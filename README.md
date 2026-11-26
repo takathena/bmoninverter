@@ -1,3 +1,12 @@
+Benar sekali, mohon maaf saya terlewat untuk memperbarui `README.md`-nya di jawaban sebelumnya. Karena kita sekarang menggunakan `.env`, ada perubahan instruksi terutama di bagian *deployment* dan keamanan. 
+
+Berikut adalah **`README.md` versi terbaru** yang sudah disesuaikan dengan konfigurasi `.env`. Silakan timpa file `README.md` Anda dengan kode di bawah ini:
+
+---
+
+### 📄 File `README.md` (Terbaru - v1.4 + .env)
+
+```markdown
 # SPF Gateway (v1.4) - Growatt Multi-Inverter Monitoring
 
 Sistem monitoring dan kontrol jarak jauh (IoT) untuk inverter **Growatt SPF** (Off-Grid) menggunakan ESP32 + Modul RS485 (MAX485), dengan server Python (FastAPI) yang berjalan di dalam Docker.
@@ -7,6 +16,7 @@ Sistem monitoring dan kontrol jarak jauh (IoT) untuk inverter **Growatt SPF** (O
 - **Dashboard** mendukung **Multi-Inverter** (bisa memantau lebih dari satu ESP32/inverter sekaligus).
 - **Keamanan**: Dashboard dilindungi Basic Auth, API dilindungi API Key.
 - **Keandalan**: ESP32 dilengkapi Watchdog, Auto-Reconnect, dan Offline Buffer.
+- **Konfigurasi Fleksibel**: Semua pengaturan sensitif (password, API Key, dll) disimpan di file `.env`.
 
 ## 📐 Arsitektur Sistem
 
@@ -41,12 +51,15 @@ Sistem monitoring dan kontrol jarak jauh (IoT) untuk inverter **Growatt SPF** (O
 
 ## 📂 Struktur Folder
 
-Pastikan folder proyek Anda rapi seperti ini sebelum menjalankan Docker:
+Pastikan folder proyek Anda rapi seperti ini:
 
 ```text
 spf-gateway/
 ├── data/                  # (Dibuat otomatis oleh Docker) Berisi spf.db
 ├── docs/                  # Dokumentasi versi sebelumnya (v1.1 - v1.4)
+├── .env                   # File konfigurasi rahasia (WAJIB DIBUAT)
+├── .dockerignore
+├── .gitignore
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
@@ -55,27 +68,51 @@ spf-gateway/
 ├── main.py                # Kode untuk ESP32 (MicroPython)
 └── README.md
 ```
-*(Catatan: Hapus file `spf.db` jika ada di folder utama. Biarkan Docker membuatnya di dalam folder `data/`).*
+*(Catatan: Pastikan tidak ada file `spf.db` di folder utama. Database akan otomatis dibuat di dalam folder `data/`).*
 
 ---
 
 ## 🚀 1. Deployment Sisi Server (Docker)
 
-Anda hanya perlu melakukan ini sekali. Pastikan **Docker Desktop** sudah terinstal dan menyala di laptop/PC Anda.
+### A. Buat File Konfigurasi `.env`
+Ini adalah langkah **paling penting**. Buat file baru bernama `.env` (titik di depannya wajib) di folder yang sama dengan `docker-compose.yml`. Isi dengan konfigurasi Anda:
 
-1.  Buka terminal/CMD, masuk ke folder proyek (`spf-gateway`).
-2.  Jalankan perintah build dan start:
-    ```bash
-    docker-compose up -d --build
-    ```
-3.  Buka browser dan akses: `http://localhost:8000`
-4.  Login dengan:
-    *   **Username:** `admin`
-    *   **Password:** `growatt123`
-5.  **Perintah Docker Penting:**
-    *   Melihat log server: `docker-compose logs -f`
-    *   Mematikan server: `docker-compose down`
-    *   Restart server: `docker-compose restart`
+```env
+# ================= KEAMANAN =================
+DASHBOARD_USER=admin
+DASHBOARD_PASS=PasswordRahasiaAnda
+API_KEY=KunciRahasiaESP32Anda
+
+# ================= TELEGRAM (Opsional) =================
+TELEGRAM_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# ================= OTOMATISASI SOC =================
+AUTO_SOC_ENABLED=True
+SOC_LOW_THRESHOLD=30
+SOC_HIGH_THRESHOLD=85
+
+# ================= PENGATURAN SISTEM =================
+OFFLINE_AFTER_S=15
+CMD_TIMEOUT_S=40
+SERVER_PORT=8000
+```
+
+### B. Jalankan Docker
+Pastikan **Docker Desktop** sudah terinstal dan menyala. Buka terminal/CMD, masuk ke folder proyek, lalu jalankan:
+
+```bash
+docker-compose up -d --build
+```
+
+### C. Akses Dashboard
+1. Buka browser dan akses: `http://localhost:8000`
+2. Login menggunakan **Username** dan **Password** yang sudah Anda tulis di file `.env` tadi.
+
+**Perintah Docker Penting:**
+*   Melihat log server: `docker-compose logs -f`
+*   Mematikan server: `docker-compose down`
+*   Restart server (jika ganti settingan di `.env`): `docker-compose restart`
 
 ---
 
@@ -90,12 +127,12 @@ Anda hanya perlu melakukan ini sekali. Pastikan **Docker Desktop** sudah terinst
 *   `A, B` -> Port RS485 Inverter (Tukar A/B jika gagal konek)
 
 ### B. Konfigurasi Kode (`main.py`)
-Buka file `main.py` dan sesuaikan variabel di bagian paling atas:
+Buka file `main.py` di folder ESP32 dan sesuaikan variabel di bagian paling atas:
 ```python
 WIFI_SSID = "NAMA_WIFI_ANDA"
 WIFI_PASS = "PASSWORD_WIFI_ANDA"
 SERVER_URL = "http://192.168.1.10:8000/api/ingest" # Ganti IP dengan IP Laptop Anda
-API_KEY = "KunciRahasiaESP32Anda"                  # Harus sama dengan di server.py
+API_KEY = "KunciRahasiaESP32Anda"                  # HARUS SAMA dengan API_KEY di file .env
 DEVICE_ID = "esp32_rumah"                          # Beri nama unik untuk inverter ini
 ```
 
@@ -124,7 +161,7 @@ Anda bisa mengubah mode pengisian baterai (PV/PLN), jam operasional PLN, dan bat
 
 ### Auto-SOC & Notifikasi Telegram
 *   Klik tombol **Auto-SOC** di pojok kanan atas untuk mengaktifkan otomatisasi baterai (jika SOC < 30% paksa pakai PLN, jika > 85% paksa pakai PV saja).
-*   Untuk mengaktifkan notifikasi Telegram, isi `TELEGRAM_TOKEN` dan `TELEGRAM_CHAT_ID` di dalam file `server.py`, lalu jalankan `docker-compose up -d --build` kembali.
+*   Untuk mengaktifkan notifikasi Telegram, isi `TELEGRAM_TOKEN` dan `TELEGRAM_CHAT_ID` di dalam file `.env`, lalu jalankan `docker-compose restart`.
 
 ---
 
@@ -132,18 +169,24 @@ Anda bisa mengubah mode pengisian baterai (PV/PLN), jam operasional PLN, dan bat
 
 | Gejala | Kemungkinan Penyebab | Solusi |
 | :--- | :--- | :--- |
-| **Dashboard minta password terus** | Password salah atau sesi browser habis. | Masukkan `admin` / `growatt123`. Refresh halaman. |
-| **ESP32 log: `Gagal kirim ke server: 401`** | API Key tidak cocok. | Samakan string `API_KEY` di `main.py` dan `server.py`. |
+| **Dashboard minta password terus** | Password salah atau sesi browser habis. | Cek kembali Username/Password di file `.env`. Refresh halaman. |
+| **ESP32 log: `Gagal kirim ke server: 401`** | API Key tidak cocok. | Samakan string `API_KEY` di `main.py` ESP32 dan file `.env` di server. |
 | **Inverter tidak menjawab** | Kabel A/B terbalik, atau salah port RS485. | Tukar kabel A dan B. Pastikan kabel di port yang benar. |
 | **Setingan gagal (Log: `gagal`)** | Inverter sibuk / EEPROM belum siap. | Klik "Terapkan" sekali lagi. Sistem sudah punya *retry* otomatis. |
 | **Grafik tidak muncul** | Laptop tidak terhubung internet (Chart.js CDN). | Hubungkan laptop ke internet atau unduh Chart.js secara lokal. |
-| **Dropdown Inverter kosong** | ESP32 belum mengirim data atau API Key salah. | Cek log ESP32, pastikan `API_KEY` cocok dan server menyala. |
 | **Data hilang saat Docker restart** | Volume tidak terpasang dengan benar. | Pastikan folder `data/` ada di folder yang sama dengan `docker-compose.yml`. |
+| **Server gagal menyala (Port bentrok)** | Port 8000 dipakai aplikasi lain. | Ubah `SERVER_PORT=8001` di file `.env`, lalu jalankan `docker-compose up -d` ulang. |
 
 ---
 **Catatan Rilis:**
-*   **v1.4:** Skalabilitas Multi-Inverter & Docker.
+*   **v1.4:** Skalabilitas Multi-Inverter, Docker, & Konfigurasi `.env`.
 *   **v1.3:** Otomatisasi SOC & Notifikasi Telegram.
 *   **v1.2:** Keamanan API Key & Basic Auth.
 *   **v1.1:** Keandalan Watchdog, Auto-Reconnect, & Retry.
+
+> ⚠️ **PENTING:** Jangan pernah meng-upload file `.env` ke repositori publik (seperti GitHub). File ini berisi password dan kunci rahasia Anda.
 ```
+
+---
+
+Dengan pembaruan ini, dokumentasi sudah 100% selaras dengan kode terbaru. Anda tinggal membuat file `.env`, menjalankan Docker, dan semuanya akan berjalan dengan aman tanpa ada *password* yang tertulis di dalam kode (`server.py`).

@@ -1,4 +1,4 @@
-import json, sqlite3, threading, time, secrets, csv, io, urllib.request, urllib.parse
+import json, sqlite3, threading, time, secrets, csv, io, urllib.request, urllib.parse, os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uvicorn
@@ -6,22 +6,32 @@ from fastapi import FastAPI, HTTPException, Query, Depends, Header
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# Membaca file .env
+load_dotenv()
 
 BASE = Path(__file__).parent
-DB_PATH = BASE / "data" / "spf.db"  # Disimpan di folder data agar mudah di-mount Docker
-DB_PATH.parent.mkdir(exist_ok=True) # Buat folder jika belum ada
+DB_PATH = BASE / "data" / "spf.db"
+DB_PATH.parent.mkdir(exist_ok=True)
 
-OFFLINE_AFTER_S = 15
-CMD_TIMEOUT_S = 40
+# ================= MEMBACA DARI .ENV =================
+OFFLINE_AFTER_S = int(os.getenv("OFFLINE_AFTER_S", 15))
+CMD_TIMEOUT_S = int(os.getenv("CMD_TIMEOUT_S", 40))
 
-DASHBOARD_USER, DASHBOARD_PASS = "admin", "growatt123"
-API_KEY = "KunciRahasiaESP32Anda"
+DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
+DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "growatt123")
+API_KEY = os.getenv("API_KEY", "KunciRahasiaESP32Anda")
 
-TELEGRAM_TOKEN, TELEGRAM_CHAT_ID = "", ""
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 last_alert_time = 0
 
-AUTO_SOC_ENABLED = True
-SOC_LOW_THRESHOLD, SOC_HIGH_THRESHOLD = 30, 85
+# Konversi string "True"/"False" dari .env menjadi boolean Python
+AUTO_SOC_ENABLED = os.getenv("AUTO_SOC_ENABLED", "True").lower() in ("true", "1", "t")
+SOC_LOW_THRESHOLD = int(os.getenv("SOC_LOW_THRESHOLD", 30))
+SOC_HIGH_THRESHOLD = int(os.getenv("SOC_HIGH_THRESHOLD", 85))
+# =====================================================
 
 security = HTTPBasic()
 def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
@@ -55,12 +65,11 @@ SETTINGS: List[Dict[str, Any]] = [
 SETTINGS_BY_REG = {s["reg"]: s for s in SETTINGS}
 
 lock = threading.Lock()
-states: Dict[str, Dict[str, Any]] = {} # <-- MULTI-DEVICE STATE
+states: Dict[str, Dict[str, Any]] = {}
 commands: Dict[int, Dict[str, Any]] = {}
 next_cmd_id = 1
 
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
-# Tabel readings sekarang punya device_id
 db.execute("CREATE TABLE IF NOT EXISTS readings (device_id TEXT, ts INTEGER, pv_w REAL, load_w REAL, bat_v REAL, soc REAL, bat_w REAL, grid_v REAL, inv_temp REAL)")
 db.execute("CREATE TABLE IF NOT EXISTS audit (device_id TEXT, ts INTEGER, reg INTEGER, label TEXT, old TEXT, new TEXT, status TEXT, detail TEXT)")
 db.commit()
@@ -73,7 +82,7 @@ def audit(dev_id: str, reg: int, label: str, old: Any, new: Any, status: str, de
 app = FastAPI(title="SPF Gateway v1.4")
 
 class Ingest(BaseModel):
-    device: str # Wajib ada
+    device: str
     slave: Optional[int] = None
     ok: bool = False
     error: Optional[str] = None
@@ -143,7 +152,7 @@ def ingest(p: Ingest):
             process_automation(dev_id, L, states[dev_id]["holding"])
 
         for c in commands.values():
-            if c["device_id"] != dev_id: continue # Hanya kirim perintah untuk device ini
+            if c["device_id"] != dev_id: continue
             if c["status"] == "menunggu":
                 c["status"] = "dikirim"; c["sent_at"] = now
                 out.append({"id": c["id"], "reg": c["reg"], "value": c["value"]})
