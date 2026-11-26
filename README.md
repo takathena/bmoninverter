@@ -1,174 +1,149 @@
-# SPF Gateway (prototype)
+# SPF Gateway (v1.4) - Growatt Multi-Inverter Monitoring
 
-Gateway monitoring dan pengaturan inverter **Growatt SPF** (off-grid) memakai ESP32 + modul MAX485, dengan dashboard web di laptop.
+Sistem monitoring dan kontrol jarak jauh (IoT) untuk inverter **Growatt SPF** (Off-Grid) menggunakan ESP32 + Modul RS485 (MAX485), dengan server Python (FastAPI) yang berjalan di dalam Docker.
 
-- **ESP32** membaca inverter lewat Modbus RTU (RS485), lalu mengirim datanya ke server lewat WiFi.
-- **Server** (Python/FastAPI) menyimpan riwayat dan menyajikan dashboard.
-- **Dashboard** menampilkan data live, grafik riwayat, dan memungkinkan mengubah setingan inverter.
+- **ESP32** membaca Modbus RTU dari inverter dan mengirimkannya ke server via WiFi.
+- **Server** (FastAPI + SQLite) menyimpan histori, menyajikan dashboard, dan mengantre perintah kontrol.
+- **Dashboard** mendukung **Multi-Inverter** (bisa memantau lebih dari satu ESP32/inverter sekaligus).
+- **Keamanan**: Dashboard dilindungi Basic Auth, API dilindungi API Key.
+- **Keandalan**: ESP32 dilengkapi Watchdog, Auto-Reconnect, dan Offline Buffer.
 
-> Status: prototype. Peta register sudah dicocokkan dengan dokumen protokol Growatt, tetapi kode belum dites lama di lapangan. Jangan dipakai tanpa pengawasan.
+## 📐 Arsitektur Sistem
 
-## Arsitektur
-
+```text
+[ Inverter 1 ] ──RS485──> [ ESP32 A ] (device_id: "esp32_rumah")
+                                  │
+                                  │ HTTP POST (Data + API Key)
+                                  ▼
+[ Inverter 2 ] ──RS485──> [ ESP32 B ] (device_id: "esp32_gudang")
+                                  │
+                                  │ HTTP POST (Data + API Key)
+                                  ▼
+                       [ WiFi Router / LAN ]
+                                  │
+                                  ▼
++---------------------------------------------------------+
+|                  [ Docker Container ]                   |
+|  [ FastAPI Server ]                                     |
+|  - Validasi API Key                                     |
+|  - Simpan histori (SQLite) berdasarkan device_id        |
+|  - Otomatisasi SOC & Notifikasi Telegram                |
+|                                                         |
+|  [ SQLite (data/spf.db) ] <── (Volume Mounted ke Host)  |
++---------------------------------------------------------+
+                                  ▲
+                                  │ HTTP GET (polling)
+                                  │
+                       [ Browser (Dashboard) ]
+                       - Login (Basic Auth)
+                       - Dropdown pilih Inverter
 ```
-Inverter ──RS485──► MAX485 ──► ESP32 ──WiFi/HTTP──► Server (laptop) ──► Dashboard (browser)
-                                  ▲                      │
-                                  └── perintah ubah setingan (dibalas di tiap kiriman data)
-```
 
-ESP32 yang selalu memulai koneksi (POST ke server), jadi laptop tidak perlu bisa dihubungi dari ESP32. Perintah ubah setingan diantre di server dan diambil ESP32 pada kiriman berikutnya (sekitar 3-6 detik).
+## 📂 Struktur Folder
 
-## Struktur folder
+Pastikan folder proyek Anda rapi seperti ini sebelum menjalankan Docker:
 
-```
+```text
 spf-gateway/
-├── README.md
-├── esp32/
-│   └── main.py            # MicroPython: baca inverter, kirim ke server, tulis setingan
-└── server/
-    ├── server.py          # FastAPI + SQLite
-    ├── dashboard.html     # tampilan dashboard
-    └── requirements.txt
+├── data/                  # (Dibuat otomatis oleh Docker) Berisi spf.db
+├── docs/                  # Dokumentasi versi sebelumnya (v1.1 - v1.4)
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── server.py
+├── dashboard.html
+├── main.py                # Kode untuk ESP32 (MicroPython)
+└── README.md
+```
+*(Catatan: Hapus file `spf.db` jika ada di folder utama. Biarkan Docker membuatnya di dalam folder `data/`).*
+
+---
+
+## 🚀 1. Deployment Sisi Server (Docker)
+
+Anda hanya perlu melakukan ini sekali. Pastikan **Docker Desktop** sudah terinstal dan menyala di laptop/PC Anda.
+
+1.  Buka terminal/CMD, masuk ke folder proyek (`spf-gateway`).
+2.  Jalankan perintah build dan start:
+    ```bash
+    docker-compose up -d --build
+    ```
+3.  Buka browser dan akses: `http://localhost:8000`
+4.  Login dengan:
+    *   **Username:** `admin`
+    *   **Password:** `growatt123`
+5.  **Perintah Docker Penting:**
+    *   Melihat log server: `docker-compose logs -f`
+    *   Mematikan server: `docker-compose down`
+    *   Restart server: `docker-compose restart`
+
+---
+
+## 🔌 2. Deployment Sisi ESP32
+
+### A. Persiapan Hardware (Wiring MAX485 ke ESP32)
+*   `VCC` -> 5V ESP32
+*   `GND` -> GND ESP32
+*   `DI` -> P17 (TX2)
+*   `RO` -> P16 (RX2) **[Wajib pakai Pembagi Tegangan: Resistor 1k & 2k]**
+*   `DE + RE` -> P4 (Disambung jadi satu)
+*   `A, B` -> Port RS485 Inverter (Tukar A/B jika gagal konek)
+
+### B. Konfigurasi Kode (`main.py`)
+Buka file `main.py` dan sesuaikan variabel di bagian paling atas:
+```python
+WIFI_SSID = "NAMA_WIFI_ANDA"
+WIFI_PASS = "PASSWORD_WIFI_ANDA"
+SERVER_URL = "http://192.168.1.10:8000/api/ingest" # Ganti IP dengan IP Laptop Anda
+API_KEY = "KunciRahasiaESP32Anda"                  # Harus sama dengan di server.py
+DEVICE_ID = "esp32_rumah"                          # Beri nama unik untuk inverter ini
 ```
 
-## Kebutuhan
+### C. Upload ke ESP32
+1.  Buka **Thonny** atau **mpremote**.
+2.  Upload file `main.py` ke ESP32.
+3.  Tekan tombol **Reset** pada ESP32.
+4.  Lihat Serial Monitor. Jika berhasil, akan muncul:
+    *   `WiFi OK: 192.168.x.x`
+    *   `Inverter menjawab di alamat 1` (atau 11)
 
-- ESP32 dengan firmware **MicroPython**
-- Modul **MAX485** (TTL ke RS485)
-- Resistor 1k dan 2k (pembagi voltase untuk jalur RO)
-- Kabel RJ45 untuk port RS485 inverter
-- Laptop dengan Python 3.9+ dan satu jaringan WiFi dengan ESP32
+---
 
-## Wiring
+## ⚙️ 3. Cara Menggunakan Dashboard
 
-| MAX485 | ESP32 |
-|---|---|
-| VCC | 5V |
-| GND | GND |
-| DI | P17 (TX2) |
-| RO | P16 (RX2), lewat pembagi voltase |
-| DE + RE | P4 (kedua pin disambung jadi satu) |
-| A, B | A, B di port RS485 inverter |
+### Multi-Inverter
+Di pojok kiri atas dashboard, terdapat *dropdown* **Inverter**. 
+*   Jika Anda menyalakan ESP32 kedua (misal dengan `DEVICE_ID = "esp32_gudang"`), nama tersebut akan otomatis muncul di dropdown tanpa perlu me-restart server.
+*   Pilih nama inverter pada dropdown untuk melihat data, grafik, dan settingan khusus inverter tersebut.
 
-Pembagi voltase untuk RO (output RO = 5 V, pin ESP32 maksimal 3,3 V):
+### Kontrol & Setingan
+Anda bisa mengubah mode pengisian baterai (PV/PLN), jam operasional PLN, dan batas tegangan baterai. 
+*   Perubahan akan dikirim ke ESP32 pada siklus berikutnya (3-6 detik).
+*   Setelah ditulis, ESP32 akan membaca ulang untuk memastikan perintah berhasil (Read-back).
+*   Log perubahan (berhasil/gagal) dapat dilihat di tabel bagian bawah.
 
+### Auto-SOC & Notifikasi Telegram
+*   Klik tombol **Auto-SOC** di pojok kanan atas untuk mengaktifkan otomatisasi baterai (jika SOC < 30% paksa pakai PLN, jika > 85% paksa pakai PV saja).
+*   Untuk mengaktifkan notifikasi Telegram, isi `TELEGRAM_TOKEN` dan `TELEGRAM_CHAT_ID` di dalam file `server.py`, lalu jalankan `docker-compose up -d --build` kembali.
+
+---
+
+## 🛠️ Troubleshooting
+
+| Gejala | Kemungkinan Penyebab | Solusi |
+| :--- | :--- | :--- |
+| **Dashboard minta password terus** | Password salah atau sesi browser habis. | Masukkan `admin` / `growatt123`. Refresh halaman. |
+| **ESP32 log: `Gagal kirim ke server: 401`** | API Key tidak cocok. | Samakan string `API_KEY` di `main.py` dan `server.py`. |
+| **Inverter tidak menjawab** | Kabel A/B terbalik, atau salah port RS485. | Tukar kabel A dan B. Pastikan kabel di port yang benar. |
+| **Setingan gagal (Log: `gagal`)** | Inverter sibuk / EEPROM belum siap. | Klik "Terapkan" sekali lagi. Sistem sudah punya *retry* otomatis. |
+| **Grafik tidak muncul** | Laptop tidak terhubung internet (Chart.js CDN). | Hubungkan laptop ke internet atau unduh Chart.js secara lokal. |
+| **Dropdown Inverter kosong** | ESP32 belum mengirim data atau API Key salah. | Cek log ESP32, pastikan `API_KEY` cocok dan server menyala. |
+| **Data hilang saat Docker restart** | Volume tidak terpasang dengan benar. | Pastikan folder `data/` ada di folder yang sama dengan `docker-compose.yml`. |
+
+---
+**Catatan Rilis:**
+*   **v1.4:** Skalabilitas Multi-Inverter & Docker.
+*   **v1.3:** Otomatisasi SOC & Notifikasi Telegram.
+*   **v1.2:** Keamanan API Key & Basic Auth.
+*   **v1.1:** Keandalan Watchdog, Auto-Reconnect, & Retry.
 ```
-MAX485 RO ──[ 1k ]──┬──► P16 ESP32
-                    │
-                  [ 2k ]
-                    │
-                   GND
-```
-
-**Pin RJ45 mana yang A dan B jangan ditebak.** Cek gambar pinout di repo referensi (lihat bagian Referensi) atau manual inverter sebelum menyambung. Kalau data tidak masuk, tukar A dan B.
-
-## Menjalankan
-
-### 1. Server (laptop)
-
-```bash
-cd server
-pip install -r requirements.txt
-python server.py
-```
-
-Buka `http://localhost:8000`. Server mendengarkan di port 8000 untuk semua antarmuka. Kalau ESP32 tidak bisa terhubung, cek firewall laptop untuk port 8000.
-
-Cari IP laptop di jaringan WiFi (misalnya `192.168.1.10`).
-
-### 2. ESP32
-
-1. Edit bagian atas `esp32/main.py`:
-
-   ```python
-   WIFI_SSID = "NAMA_WIFI"
-   WIFI_PASS = "PASSWORD_WIFI"
-   SERVER_URL = "http://192.168.1.10:8000/api/ingest"   # IP laptop
-   SLAVE_CANDIDATES = [1, 11]                           # alamat Modbus yang dicoba
-   ```
-
-2. Upload ke ESP32 sebagai `main.py` (Thonny atau `mpremote`), lalu reset board.
-3. Lihat log di Shell. Kalau berhasil, muncul "WiFi OK" dan "Inverter menjawab di alamat ...".
-
-Dashboard akan menunjukkan "ESP32 online" begitu data pertama masuk.
-
-## Dashboard
-
-- **Kartu data live:** panel surya (voltase, ampere, watt, energi hari ini), baterai (SOC, voltase, watt charge/discharge), beban, PLN, suhu, dan kode gangguan.
-- **Grafik riwayat:** watt panel, watt beban, watt baterai, dan SOC. Pilihan 30 menit sampai 24 jam. Grafik memakai Chart.js dari CDN, jadi laptop perlu internet.
-- **Pengaturan inverter:** ubah setingan lalu tekan **Terapkan**. Setingan bertanda "hati-hati" meminta konfirmasi dulu.
-- **Log perubahan:** nilai lama, nilai baru, dan hasilnya (ok, gagal, timeout).
-
-### Setingan yang bisa diubah
-
-| Setingan | Register |
-|---|---|
-| Prioritas sumber output (SBU / SOL / UTI / SUB) | 1 |
-| Sumber charge baterai | 2 |
-| Jam mulai dan selesai output PLN | 3, 4 |
-| Jam mulai dan selesai charge dari PLN | 5, 6 |
-| Buzzer | 22 |
-| Ampere charge maksimum (10-100 A) | 34 |
-| Voltase bulk dan float (48,0-58,4 V) | 35, 36 |
-
-Setingan lain (tipe baterai, alamat Modbus, reset, firmware, dan sejenisnya) sengaja **tidak** bisa diubah dari dashboard. Yang lain ditampilkan hanya-baca.
-
-## Pengaman
-
-- Hanya register di daftar putih yang boleh ditulis, dan dicek di dua tempat (server dan ESP32).
-- Rentang nilai divalidasi. Voltase bulk tidak boleh lebih kecil dari float.
-- Satu perintah menunggu per register.
-- Setelah menulis, ESP32 membaca ulang nilainya. Kalau tidak sama, hasilnya "gagal".
-- Setiap perubahan dicatat di tabel `audit` (SQLite).
-- Jeda minimal 900 ms antar perintah Modbus, sesuai dokumen Growatt (minimal 850 ms).
-
-## Catatan model: SPF 5000 vs SPF 6000 ES Plus
-
-Bacaan data (input register) sama untuk keduanya. Setingan (holding register) ada perbedaan:
-
-- **Tipe baterai (reg 39):** kodenya beda, jadi ditampilkan sebagai angka mentah dengan keterangan kedua versi.
-- **Voltase bulk dan float** hanya berlaku bila tipe baterai **User**.
-- **Ampere charge maksimum** tidak bisa diubah bila baterai **lithium**, karena dipegang BMS.
-- **Reg 37 (pindah baterai ke PLN):** satuannya ikut tipe baterai (persen untuk lithium, voltase untuk lead acid), jadi hanya ditampilkan, tidak bisa diubah.
-- **Jam PLN (reg 3-6)** belum terkonfirmasi di 6000 ES Plus. Kalau ditolak, alasannya muncul di log.
-- Alamat Modbus bisa 1 atau 11 (repo referensi 6000 ES Plus memakai 11).
-
-## API server
-
-| Endpoint | Fungsi |
-|---|---|
-| `POST /api/ingest` | Dipanggil ESP32: kirim data, terima perintah |
-| `GET /api/latest` | Data live, status koneksi, dan setingan |
-| `GET /api/history?minutes=60` | Riwayat untuk grafik |
-| `POST /api/settings` | Antre perintah ubah setingan `{reg, value}` |
-| `GET /api/commands` | Perintah berjalan dan log perubahan |
-| `GET /` | Dashboard |
-
-Data disimpan di `server/spf.db` (SQLite), dibuat otomatis.
-
-## Troubleshooting
-
-| Gejala | Yang dicek |
-|---|---|
-| Dashboard "belum ada data dari ESP32" | `SERVER_URL` dan IP laptop, firewall port 8000, WiFi sama |
-| "ESP32 online tapi inverter tidak menjawab" | Tukar A dan B, DE dan RE disambung jadi satu ke P4, VCC ke 5V, kabel di port RS485, alamat Modbus |
-| `timeout` terus | Sama seperti di atas, ditambah baud rate (9600) |
-| `CRC salah` | Kabel panjang atau noise, pembagi voltase RO, GND bersama |
-| Setingan kembali ke nilai lama | Dongle ShineWiFi menimpa, atau tidak berlaku untuk tipe baterai tersebut |
-| Perintah status `timeout` | ESP32 offline atau lambat, ulangi |
-
-## Batasan
-
-- Belum ada login. Pakai hanya di jaringan lokal tepercaya.
-- Server menyimpan data di memori dan SQLite lokal, tanpa backup.
-- Hanya satu inverter dan satu ESP32.
-- Kode server belum dites otomatis (hanya cek sintaks dan uji logika CRC).
-
-## Referensi
-
-- Repo konfigurasi SPF 6000 ES Plus: https://github.com/vipmenable/Growatt-SPF-6000-ES-plus (berisi `modbus.yaml`, PDF protokol OffGrid V0.14, dan gambar pinout RS485)
-- Protokol Growatt OffGrid SPF5000 Modbus RS485 RTU V0.11: https://watts247.com/manuals/gw/GrowattModBusProtocol.pdf
-- Integrasi Home Assistant Growatt Modbus (referensi setingan SPF ES PLUS): https://0xaha.github.io/Growatt_ModbusTCP/
-
-  <img width="1610" height="2865" alt="image" src="https://github.com/user-attachments/assets/4eb59b4a-eb79-43bf-9e26-f3b324819ee9" />
-

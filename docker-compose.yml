@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  spf-gateway:
+    build: .
+    container_name: growatt-server
+    ports:
+      - "8000:8000"
+    volumes:
+      # Memetakan folder data di laptop ke dalam container
+      - ./data:/app/data
+    restart: unless-stopped

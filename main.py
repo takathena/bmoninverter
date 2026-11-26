@@ -1,4 +1,4 @@
-# ESP32 (MicroPython) v1.2 (Secure API)
+# ESP32 (MicroPython) v1.4 (Multi-Inverter)
 import network, time, json, machine, gc
 from machine import UART, Pin
 
@@ -11,7 +11,8 @@ except ImportError:
 WIFI_SSID = "NAMA_WIFI"
 WIFI_PASS = "PASSWORD_WIFI"
 SERVER_URL = "http://192.168.1.10:8000/api/ingest" 
-API_KEY = "KunciRahasiaESP32Anda"  # HARUS SAMA dengan di server.py
+API_KEY = "KunciRahasiaESP32Anda"
+DEVICE_ID = "esp32_rumah"  # <--- BERI NAMA UNIK UNTUK SETIAP ESP32
 SLAVE_CANDIDATES = [1, 11]
 POLL_MS = 3000
 # =====================================================
@@ -138,10 +139,7 @@ def detect_slave():
     return False
 
 def post(payload):
-    headers = {
-        "Content-Type": "application/json",
-        "X-API-Key": API_KEY  # <--- KUNCI KEAMANAN DITAMBAHKAN DI SINI
-    }
+    headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
     r = requests.post(SERVER_URL, data=json.dumps(payload), headers=headers, timeout=HTTP_TIMEOUT)
     try: return r.json()
     finally: r.close()
@@ -155,7 +153,7 @@ def run_cmd(c):
         if not lo <= val <= hi: raise ValueError("nilai di luar rentang %d-%d" % (lo, hi))
         
         write_reg(reg, val)
-        time.sleep_ms(1000) # Jeda EEPROM
+        time.sleep_ms(1000)
         
         success = False
         for attempt in range(3):
@@ -189,7 +187,8 @@ def main():
             if not wlan.isconnected(): time.sleep(5); continue
 
         t0 = time.ticks_ms()
-        payload = {"device": "esp32-spf", "slave": slave_id, "ok": False}
+        # Tambahkan DEVICE_ID ke payload
+        payload = {"device": DEVICE_ID, "slave": slave_id, "ok": False}
         try:
             payload["live"] = decode(read_input_all()); payload["ok"] = True
         except OSError as e:

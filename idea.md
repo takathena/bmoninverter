@@ -129,3 +129,136 @@ Jika Anda nanti membuat fitur otomasi (misal: *"Setiap jam 18:00, ganti priorita
 
 **Saran untuk Anda saat ini:** 
 Karena sistem ini sudah jalan di level prototipe, cobalah biarkan menyala (running) selama 24 jam penuh. Perhatikan apakah ada *memory leak* di ESP32 (cek *free memory* di shell), atau apakah inverter menolak perintah tertentu saat beban sedang tinggi. Setelah stabil, mulailah mengerjakan **Prioritas 1 (Watchdog & DB Cleanup)**.
+
+
+
+
+Baik, saya paham. Membayangkan alur data antar perangkat lewat teks memang terkadang membingungkan. Mari kita visualkan dengan gambar dan analogi sederhana.
+
+Inti dari solusi ini adalah mengubah **ESP32 menjadi "Kurir Buta"** yang hanya bisa membaca dan menulis angka, sementara **Server menjadi "Manajer"** yang memegang buku panduan (Profil Perangkat) untuk masing-masing merek inverter.
+
+Berikut adalah topologi dan alurnya:
+
+### 1. Topologi Sistem (Fisik & Logis)
+
+Gambaran bagaimana kedua inverter dengan merek berbeda bisa dihubungkan ke satu sistem.
+
+```text
++-------------------+                 +-------------------+
+|  INVERTER 1       |                 |  INVERTER 2       |
+|  Brand: Growatt   |                 |  Brand: Deye      |
+|  Model: SPF 5000  |                 |  Model: SUN-6.6k  |
++---------+---------+                 +---------+---------+
+          |                                     |
+          | Kabel RS485 (A & B)                 | Kabel RS485 (A & B)
+          |                                     |
++---------v---------+                 +---------v---------+
+|  ESP32 (Rumah)    |                 |  ESP32 (Gudang)   |
+|  Device_ID:       |                 |  Device_ID:       |
+|  "growatt_5000"   |                 |  "deye_6600"      |
++---------+---------+                 +---------+---------+
+          |                                     |
+          | WiFi (HTTP POST)                    | WiFi (HTTP POST)
+          | Kirim data mentah                   | Kirim data mentah
+          |                                     |
+          +------------------+------------------+
+                             |
+                             v
++-------------------------------------------------------+
+|                  SERVER (Laptop/Docker)               |
+|                                                       |
+|  [1] Terima data dari ESP32                           |
+|  [2] Cek Device_ID: "deye_6600"                       |
+|  [3] Buka Buku Panduan -> "profil_deye.json"          |
+|  [4] Terjemahkan data mentah jadi data yang terbaca   |
+|                                                       |
+|  [5] Kirim balik ke ESP32:                            |
+|      "Hei, siklus berikutnya tolong baca alamat 588!" |
++--------------------------+----------------------------+
+                           |
+                           v
+                    [ DASHBOARD UI ]
+             (Semua data disamakan namanya)
+             - SOC Baterai
+             - Daya PV
+             - Daya Beban
+```
+
+---
+
+### 2. Alur Kerja (Bagaimana Server Mengatur ESP32)
+
+Ini adalah kunci utamanya. ESP32 tidak lagi diprogram mati-matian untuk membaca alamat Growatt. Server yang memberi tahu ESP32 apa yang harus dibaca.
+
+**Fase 1: ESP32 Lapor Diri**
+```text
+[ ESP32 Deye ]  ---------------------->  [ SERVER ]
+   "Halo Manajer, saya ESP32 Deye.       "Oh, ini Deye. 
+    Ini data mentah yang saya baca."      Saya simpan dulu datanya."
+```
+
+**Fase 2: Server Memberi Perintah Baca**
+```text
+[ ESP32 Deye ]  <----------------------  [ SERVER ]
+   Menerima pesan:                       "Karena kamu Deye,
+   "Baca alamat 588-589 (FC03)"          aturan bacanya beda.
+                                          Baca alamat 588 ya!"
+```
+
+**Fase 3: ESP32 Mengeksekusi ke Inverter Deye**
+```text
+[ ESP32 ]  -------(Kabel RS485)------->  [ INVERTER DEYE ]
+  "Halo Inverter, saya disuruh Manajer    
+   baca alamat 588."                     
+                                           
+[ ESP32 ]  <------(Kabel RS485)--------  [ INVERTER DEYE ]
+  Menerima angka: 0250                     "Ini dia angkanya: 0250"
+```
+
+**Fase 4: ESP32 Kirim Hasil ke Server**
+```text
+[ ESP32 Deye ]  ---------------------->  [ SERVER ]
+   "Manajer, ini hasil baca alamat        "Oke, saya terjemahkan.
+    588: angkanya 0250."                  0250 = 25.0% (SOC Baterai).
+                                           Tampilkan di Dashboard!"
+```
+
+---
+
+### 3. Ilustrasi "Buku Panduan" (Device Profile)
+
+Di dalam Server, Anda membuat file (misalnya `profiles.json`). Ini adalah kamus yang memberitahu Server cara menerjemahkan data.
+
+```json
+{
+  "growatt_5000": {
+    "nama_tampilan": "Growatt Rumah",
+    "pembacaan": [
+      { "parameter": "soc", "fc": 4, "alamat": 18, "tipe": "uint16", "skala": 1 },
+      { "parameter": "daya_pv", "fc": 4, "alamat": 3, "tipe": "uint32", "skala": 0.1 }
+    ]
+  },
+  "deye_6600": {
+    "nama_tampilan": "Deye Gudang",
+    "pembacaan": [
+      { "parameter": "soc", "fc": 3, "alamat": 588, "tipe": "uint16", "skala": 0.1 },
+      { "parameter": "daya_pv", "fc": 3, "alamat": 672, "tipe": "uint32", "skala": 1 }
+    ]
+  }
+}
+```
+
+**Penjelasan Ilustrasi:**
+*   Untuk **Growatt**, Server tahu SOC ada di alamat `18` (skala 1, jadi angka 50 = 50%).
+*   Untuk **Deye**, Server tahu SOC ada di alamat `588` (skala 0.1, jadi angka 250 = 25.0%).
+*   **Dasbor Anda** hanya perlu tahu satu hal: "Tampilkan angka dari variabel `soc`". Server yang bekerja keras mencocokkan alamat mana yang harus diambil dari masing-masing inverter.
+
+---
+
+### 4. Mengapa Pendekatan Ini Sangat Kuat?
+
+1.  **ESP32 Tetap Sederhana:** Anda tidak perlu membedakan Growatt atau Deye di ESP32. ESP32 cuma butuh library Modbus dasar (baca/tulis angka).
+2.  **Tambah Merek Baru = Tambah File:** Jika besok Anda beli inverter Victron, Anda tidak perlu meng-upload ulang kode ke ESP32. Cukup tambahkan "profil_victron" di Server, dan sistem langsung mengenalinya.
+3.  **Perbedaan Fungsi Modbus Diatasi di Server:** Entah itu Deye pakai `FC03` (Holding) atau Growatt pakai `FC04` (Input), Server yang mengirimkan perintah fungsi kode tersebut ke ESP32.
+
+Apakah dengan gambar dan analogi ini konsepnya menjadi lebih jelas untuk Anda? Jika sudah, kita bisa mulai membahas perubahan kode apa saja yang dibutuhkan untuk membuat arsitektur cerdas ini (misalnya di versi v1.5).
