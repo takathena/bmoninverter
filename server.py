@@ -1,4 +1,4 @@
-"""Server prototype dashboard inverter Growatt SPF.
+"""Server prototype dashboard inverter Growatt SPF (v1.2 - Secure).
 
 Jalankan:
     pip install -r requirements.txt
@@ -9,12 +9,14 @@ import json
 import sqlite3
 import threading
 import time
+import secrets
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Header
 from fastapi.responses import HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 BASE = Path(__file__).parent
@@ -22,8 +24,26 @@ DB_PATH = BASE / "spf.db"
 OFFLINE_AFTER_S = 15       # dianggap offline kalau tak ada kiriman selama ini
 CMD_TIMEOUT_S = 40         # perintah tanpa hasil selama ini -> timeout
 
+# ---------------------------------------------------------------- KEAMANAN (UBAH INI)
+DASHBOARD_USER = "admin"
+DASHBOARD_PASS = "growatt123"
+API_KEY = "KunciRahasiaESP32Anda"   # Harus sama dengan yang di main.py ESP32
+
+security = HTTPBasic()
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = secrets.compare_digest(credentials.username, DASHBOARD_USER)
+    correct_password = secrets.compare_digest(credentials.password, DASHBOARD_PASS)
+    if not (correct_username and correct_password):
+        raise HTTPException(status_code=401, detail="Username atau Password salah", headers={"WWW-Authenticate": "Basic"})
+    return credentials.username
+
+def verify_api_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="API Key tidak valid")
+    return x_api_key
+
 # ---------------------------------------------------------------- skema setingan
-# reg = nomor holding register. scale = pengali nilai tampil -> mentah (mentah = tampil / scale)
 SETTINGS: List[Dict[str, Any]] = [
     {"reg": 1, "key": "output_cfg", "label": "Prioritas sumber output", "type": "enum", "writable": True,
      "options": {0: "Baterai dulu", 1: "Panel dulu", 2: "PLN dulu"}},
@@ -47,7 +67,6 @@ SETTINGS: List[Dict[str, Any]] = [
      "min": 50.0, "max": 56.0, "scale": 0.1, "unit": "V", "danger": True},
     {"reg": 37, "key": "bat_low_v", "label": "Voltase baterai rendah (pindah ke PLN)", "type": "number",
      "writable": True, "min": 44.4, "max": 51.4, "scale": 0.1, "unit": "V", "danger": True},
-    # --- hanya tampil (tidak bisa diubah dari dashboard)
     {"reg": 7, "key": "pv_mode", "label": "Mode input panel", "type": "enum", "writable": False,
      "options": {0: "Independent", 1: "Parallel"}},
     {"reg": 8, "key": "ac_mode", "label": "Mode input AC", "type": "enum", "writable": False,
@@ -82,17 +101,13 @@ db.execute("CREATE TABLE IF NOT EXISTS audit (ts INTEGER, reg INTEGER, label TEX
            "status TEXT, detail TEXT)")
 db.commit()
 
-
 def audit(reg: int, label: str, old: Any, new: Any, status: str, detail: str = "") -> None:
     with lock:
         db.execute("INSERT INTO audit VALUES (?,?,?,?,?,?,?)",
                    (int(time.time()), reg, label, str(old), str(new), status, detail))
         db.commit()
 
-
-# ---------------------------------------------------------------- app
-app = FastAPI(title="SPF Gateway")
-
+app = FastAPI(title="SPF Gateway (Secure)")
 
 class Ingest(BaseModel):
     device: Optional[str] = None
@@ -103,37 +118,29 @@ class Ingest(BaseModel):
     holding: Optional[Dict[str, int]] = None
     results: List[Dict[str, Any]] = []
 
-
 class SettingIn(BaseModel):
     reg: int
-    value: float          # nilai dalam satuan tampil (mis. 56.4 untuk voltase)
-
+    value: float
 
 def fmt_value(s: Dict[str, Any], raw: Optional[int]) -> Any:
-    if raw is None:
-        return None
-    if s["type"] == "enum":
-        return s["options"].get(raw, f"? ({raw})")
+    if raw is None: return None
+    if s["type"] == "enum": return s["options"].get(raw, f"? ({raw})")
     v = raw * s.get("scale", 1)
     return round(v, 1) if s.get("scale", 1) != 1 else int(v)
 
-
-@app.post("/api/ingest")
+# --- RUTE API (DILINDUNGI API KEY) ---
+@app.post("/api/ingest", dependencies=[Depends(verify_api_key)])
 def ingest(p: Ingest):
     now = time.time()
     out: List[Dict[str, Any]] = []
     with lock:
         state.update(last_seen=now, slave=p.slave, ok=p.ok, error=p.error, device=p.device)
-        if p.live:
-            state["live"] = p.live
-        if p.holding:
-            state["holding"] = {int(k): v for k, v in p.holding.items()}
+        if p.live: state["live"] = p.live
+        if p.holding: state["holding"] = {int(k): v for k, v in p.holding.items()}
 
-        # hasil perintah dari ESP32
         for r in p.results:
             c = commands.get(r.get("id"))
-            if not c:
-                continue
+            if not c: continue
             c["status"] = "ok" if r.get("ok") else "gagal"
             c["detail"] = r.get("error") or f"inverter membalas {r.get('readback')}"
             c["done_at"] = now
@@ -143,7 +150,6 @@ def ingest(p: Ingest):
                         fmt_value(s, c["value"]), c["status"], c["detail"]))
             db.commit()
 
-        # simpan histori
         if p.ok and p.live:
             L = p.live
             db.execute("INSERT INTO readings VALUES (?,?,?,?,?,?,?,?)",
@@ -151,7 +157,6 @@ def ingest(p: Ingest):
                         L.get("soc"), L.get("bat_w"), L.get("grid_v"), L.get("inv_temp")))
             db.commit()
 
-        # perintah yang menunggu -> kirim ke ESP32 (sekali saja)
         for c in commands.values():
             if c["status"] == "menunggu":
                 c["status"] = "dikirim"
@@ -162,7 +167,7 @@ def ingest(p: Ingest):
                 c["detail"] = "tidak ada hasil dari ESP32"
     return {"commands": out}
 
-
+# --- RUTE DASHBOARD (DILINDUNGI BASIC AUTH) ---
 def decode_fw(h: Dict[int, int], start: int) -> str:
     try:
         chars = []
@@ -170,11 +175,9 @@ def decode_fw(h: Dict[int, int], start: int) -> str:
             v = h[r]
             chars += [chr(v >> 8), chr(v & 0xFF)]
         return "".join(c for c in chars if 32 < ord(c) < 127)
-    except KeyError:
-        return ""
+    except KeyError: return ""
 
-
-@app.get("/api/latest")
+@app.get("/api/latest", dependencies=[Depends(verify_credentials)])
 def latest():
     with lock:
         age = time.time() - state["last_seen"] if state["last_seen"] else None
@@ -191,45 +194,35 @@ def latest():
             "fw": decode_fw(h, 9), "fw_ctrl": decode_fw(h, 12),
         }
 
-
-@app.get("/api/history")
+@app.get("/api/history", dependencies=[Depends(verify_credentials)])
 def history(minutes: int = Query(60, ge=1, le=1440)):
     since = int(time.time()) - minutes * 60
     with lock:
-        rows = db.execute("SELECT ts,pv_w,load_w,bat_v,soc,bat_w,grid_v,inv_temp FROM readings "
-                          "WHERE ts>=? ORDER BY ts", (since,)).fetchall()
+        rows = db.execute("SELECT ts,pv_w,load_w,bat_v,soc,bat_w,grid_v,inv_temp FROM readings WHERE ts>=? ORDER BY ts", (since,)).fetchall()
     step = max(1, len(rows) // 600)
     rows = rows[::step]
     keys = ["ts", "pv_w", "load_w", "bat_v", "soc", "bat_w", "grid_v", "inv_temp"]
     return [dict(zip(keys, r)) for r in rows]
 
-
-@app.post("/api/settings")
+@app.post("/api/settings", dependencies=[Depends(verify_credentials)])
 def change_setting(body: SettingIn):
     global next_cmd_id
     s = SETTINGS_BY_REG.get(body.reg)
     if not s or not s["writable"]:
         raise HTTPException(400, "register ini tidak boleh diubah dari dashboard")
-
     if s["type"] == "enum":
         raw = int(body.value)
-        if raw not in s["options"]:
-            raise HTTPException(400, "pilihan tidak valid")
+        if raw not in s["options"]: raise HTTPException(400, "pilihan tidak valid")
     else:
-        if not s["min"] <= body.value <= s["max"]:
-            raise HTTPException(400, f"nilai harus {s['min']} - {s['max']} {s['unit']}")
+        if not s["min"] <= body.value <= s["max"]: raise HTTPException(400, f"nilai harus {s['min']} - {s['max']} {s['unit']}")
         raw = int(round(body.value / s["scale"]))
 
     with lock:
         h = state["holding"]
         if not state["last_seen"] or time.time() - state["last_seen"] > OFFLINE_AFTER_S:
             raise HTTPException(409, "ESP32 sedang offline")
-        # aturan silang: bulk >= float
-        if body.reg == 35 and 36 in h and raw < h[36]:
-            raise HTTPException(400, "voltase bulk tidak boleh lebih kecil dari voltase float")
-        if body.reg == 36 and 35 in h and raw > h[35]:
-            raise HTTPException(400, "voltase float tidak boleh lebih besar dari voltase bulk")
-        # satu perintah menunggu per register
+        if body.reg == 35 and 36 in h and raw < h[36]: raise HTTPException(400, "voltase bulk < float")
+        if body.reg == 36 and 35 in h and raw > h[35]: raise HTTPException(400, "voltase float > bulk")
         for c in commands.values():
             if c["reg"] == body.reg and c["status"] in ("menunggu", "dikirim"):
                 raise HTTPException(409, "masih ada perintah untuk register ini")
@@ -241,20 +234,16 @@ def change_setting(body: SettingIn):
                          "shown": fmt_value(s, raw), "old_shown": fmt_value(s, h.get(body.reg))}
     return {"id": cid, "status": "menunggu"}
 
-
-@app.get("/api/commands")
+@app.get("/api/commands", dependencies=[Depends(verify_credentials)])
 def list_commands():
     with lock:
         cur = sorted(commands.values(), key=lambda c: -c["id"])[:15]
         hist = db.execute("SELECT ts,label,old,new,status,detail FROM audit ORDER BY ts DESC LIMIT 30").fetchall()
-    return {"current": cur,
-            "audit": [dict(zip(["ts", "label", "old", "new", "status", "detail"], r)) for r in hist]}
+    return {"current": cur, "audit": [dict(zip(["ts", "label", "old", "new", "status", "detail"], r)) for r in hist]}
 
-
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, dependencies=[Depends(verify_credentials)])
 def index():
     return (BASE / "dashboard.html").read_text(encoding="utf-8")
-
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
