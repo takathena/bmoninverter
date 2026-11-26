@@ -169,3 +169,6 @@ Data disimpan di `server/spf.db` (SQLite), dibuat otomatis.
 - Repo konfigurasi SPF 6000 ES Plus: https://github.com/vipmenable/Growatt-SPF-6000-ES-plus (berisi `modbus.yaml`, PDF protokol OffGrid V0.14, dan gambar pinout RS485)
 - Protokol Growatt OffGrid SPF5000 Modbus RS485 RTU V0.11: https://watts247.com/manuals/gw/GrowattModBusProtocol.pdf
 - Integrasi Home Assistant Growatt Modbus (referensi setingan SPF ES PLUS): https://0xaha.github.io/Growatt_ModbusTCP/
+
+  <img width="1610" height="2865" alt="image" src="https://github.com/user-attachments/assets/4eb59b4a-eb79-43bf-9e26-f3b324819ee9" />
+
