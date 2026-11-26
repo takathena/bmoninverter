@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoring Inverter Growatt SPF</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:#f4f6f8; --card:#ffffff; --text:#1c2430; --muted:#6b7686; --line:#e3e8ee;
+    --accent:#2f7df6; --good:#1fa86a; --warn:#e8a317; --bad:#e04848; --pv:#f5a524; --load:#2f7df6; --bat:#1fa86a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f141b; --card:#171e28; --text:#e6ebf2; --muted:#8a96a8; --line:#273141; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; font-weight:650; }
+  .pill { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:99px; background:var(--bg); border:1px solid var(--line); font-size:13px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); }
+  .dot.on { background:var(--good); box-shadow:0 0 0 4px color-mix(in srgb,var(--good) 22%,transparent); }
+  .spacer { flex:1; }
+  main { max-width:1280px; margin:0 auto; padding:20px; display:grid; gap:16px; }
+  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+  .card h2 { margin:0 0 10px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:650; }
+  .big { font-size:34px; font-weight:700; letter-spacing:-.02em; line-height:1.1; }
+  .big small { font-size:15px; font-weight:500; color:var(--muted); margin-left:4px; }
+  .rows { margin-top:12px; display:grid; gap:5px; }
+  .row { display:flex; justify-content:space-between; color:var(--muted); }
+  .row b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+  .bar { height:10px; border-radius:99px; background:var(--bg); border:1px solid var(--line); overflow:hidden; margin-top:12px; }
+  .bar > i { display:block; height:100%; width:0; background:var(--good); transition:width .6s, background .6s; }
+  .tag { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; background:var(--bg); border:1px solid var(--line); margin-left:6px; vertical-align:middle; }
+  .tag.good { color:var(--good); } .tag.bad { color:var(--bad); } .tag.warn { color:var(--warn); }
+  .wide { grid-column:1/-1; }
+  .chartbox { height:290px; position:relative; }
+  select, input[type=number], button { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 10px; }
+  button { cursor:pointer; background:var(--accent); color:#fff; border:0; font-weight:600; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:var(--bg); color:var(--text); border:1px solid var(--line); font-weight:500; }
+  .settings { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
+  .set { border:1px solid var(--line); border-radius:10px; padding:11px 13px; display:grid; gap:8px; }
+  .set .top { display:flex; justify-content:space-between; gap:10px; }
+  .set .name { font-weight:600; }
+  .set .cur { color:var(--muted); font-variant-numeric:tabular-nums; }
+  .set .ctl { display:flex; gap:8px; align-items:center; }
+  .set .ctl input { width:110px; } .set .ctl select { flex:1; }
+  .set .hint { font-size:12px; color:var(--muted); }
+  .danger .name::after { content:"hati-hati"; margin-left:8px; font-size:11px; color:var(--warn); font-weight:600; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:12px; }
+  .ok { color:var(--good); } .gagal,.timeout { color:var(--bad); } .menunggu,.dikirim { color:var(--warn); }
+  .note { color:var(--muted); font-size:12.5px; margin:6px 0 0; }
+  #banner { display:none; padding:10px 14px; border-radius:10px; background:color-mix(in srgb,var(--bad) 14%,var(--card)); border:1px solid var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Inverter Growatt SPF</h1>
+  <span class="pill"><span class="dot" id="dot"></span><span id="conn">menunggu data...</span></span>
+  <span class="pill" id="statuspill">-</span>
+  <span class="spacer"></span>
+  <span class="pill" id="fw" style="display:none"></span>
+  <label>Riwayat
+    <select id="range">
+      <option value="30">30 menit</option>
+      <option value="60" selected>1 jam</option>
+      <option value="360">6 jam</option>
+      <option value="1440">24 jam</option>
+    </select>
+  </label>
+</header>
+
+<main>
+  <div id="banner"></div>
+
+  <div class="grid">
+    <div class="card"><h2>Panel surya</h2>
+      <div class="big"><span id="pv_w">-</span><small>W</small></div>
+      <div class="rows">
+        <div class="row"><span>PV1</span><b id="pv1">-</b></div>
+        <div class="row"><span>PV2</span><b id="pv2">-</b></div>
+        <div class="row"><span>Energi hari ini</span><b id="pv_kwh">-</b></div>
+      </div></div>
+
+    <div class="card"><h2>Baterai</h2>
+      <div class="big"><span id="soc">-</span><small>%</small></div>
+      <div class="bar"><i id="socbar"></i></div>
+      <div class="rows">
+        <div class="row"><span>Voltase</span><b id="bat_v">-</b></div>
+        <div class="row"><span id="bat_lbl">Daya</span><b id="bat_w">-</b></div>
+        <div class="row"><span>Charge dari PLN</span><b id="acchr_w">-</b></div>
+      </div></div>
+
+    <div class="card"><h2>Beban (output)</h2>
+      <div class="big"><span id="out_w">-</span><small>W</small></div>
+      <div class="bar"><i id="loadbar" style="background:var(--load)"></i></div>
+      <div class="rows">
+        <div class="row"><span>Beban</span><b id="load_pct">-</b></div>
+        <div class="row"><span>Voltase / ampere</span><b id="out_va2">-</b></div>
+        <div class="row"><span>Daya semu</span><b id="out_va">-</b></div>
+      </div></div>
+
+    <div class="card"><h2>PLN (input AC)</h2>
+      <div class="big"><span id="grid_v">-</span><small>V</small></div>
+      <div class="rows">
+        <div class="row"><span>Frekuensi</span><b id="grid_hz">-</b></div>
+        <div class="row"><span>Daya masuk</span><b id="acin_w">-</b></div>
+        <div class="row"><span>Energi charge hari ini</span><b id="acchr_kwh">-</b></div>
+      </div></div>
+
+    <div class="card"><h2>Suhu &amp; kipas</h2>
+      <div class="big"><span id="inv_temp">-</span><small>°C inverter</small></div>
+      <div class="rows">
+        <div class="row"><span>DC-DC</span><b id="dcdc_temp">-</b></div>
+        <div class="row"><span>Buck 1 / 2</span><b id="buck_t">-</b></div>
+        <div class="row"><span>Kipas MPPT / inverter</span><b id="fans">-</b></div>
+      </div></div>
+
+    <div class="card"><h2>Gangguan</h2>
+      <div class="big" style="font-size:22px" id="faultmain">-</div>
+      <div class="rows">
+        <div class="row"><span>Kode fault</span><b id="fault">-</b></div>
+        <div class="row"><span>Kode warning</span><b id="warning">-</b></div>
+      </div></div>
+  </div>
+
+  <div class="card wide"><h2>Riwayat</h2><div class="chartbox"><canvas id="chart"></canvas></div></div>
+
+  <div class="card wide">
+    <h2>Pengaturan inverter</h2>
+    <div class="settings" id="settings"></div>
+    <p class="note">Perubahan dikirim ke ESP32 pada putaran berikutnya (sekitar 3-6 detik), ditulis ke inverter, lalu dibaca ulang untuk dicek.
+      Rentang nilai mengikuti dokumen protokol Growatt SPF; kalau inverter menolak, alasannya muncul di log di bawah.</p>
+  </div>
+
+  <div class="card wide">
+    <h2>Pengaturan hanya-baca</h2>
+    <div class="grid" id="readonly" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"></div>
+  </div>
+
+  <div class="card wide">
+    <h2>Log perubahan</h2>
+    <table><thead><tr><th>Waktu</th><th>Setingan</th><th>Lama</th><th>Baru</th><th>Status</th><th>Keterangan</th></tr></thead>
+      <tbody id="audit"></tbody></table>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const STATUS = {0:"Standby",2:"Discharge (baterai ke beban)",3:"Fault",4:"Update firmware",5:"Charge dari panel",
+  6:"Charge dari PLN",7:"Charge gabungan",8:"Charge gabungan + bypass",9:"Charge panel + bypass",
+  10:"Charge PLN + bypass",11:"Bypass (PLN ke beban)",12:"Charge panel + discharge"};
+const f = (v, d=1) => (v === null || v === undefined) ? "-" : Number(v).toFixed(d);
+
+/* ---------------- live ---------------- */
+function paintLive(d) {
+  const online = d.online;
+  $("dot").classList.toggle("on", online);
+  $("conn").textContent = online ? "ESP32 online" : (d.age_s === null ? "belum ada data dari ESP32" : "ESP32 offline (" + Math.round(d.age_s) + " dtk lalu)");
+  const b = $("banner");
+  if (online && !d.inverter_ok) {
+    b.style.display = "block";
+    b.textContent = "ESP32 online tapi inverter tidak menjawab: " + (d.error || "?") + ". Cek kabel A/B, alamat Modbus, dan port RS485.";
+  } else b.style.display = "none";
+  if (d.fw) { $("fw").style.display = ""; $("fw").textContent = "FW " + d.fw + (d.fw_ctrl ? " / " + d.fw_ctrl : ""); }
+
+  const L = d.live; if (!L) return;
+  $("statuspill").textContent = STATUS[L.status] ?? ("Status " + L.status);
+  const pv = L.pv1_w + L.pv2_w;
+  $("pv_w").textContent = f(pv, 0);
+  $("pv1").textContent = `${f(L.pv1_v)} V · ${f(L.pv1_a)} A · ${f(L.pv1_w,0)} W`;
+  $("pv2").textContent = `${f(L.pv2_v)} V · ${f(L.pv2_a)} A · ${f(L.pv2_w,0)} W`;
+  $("pv_kwh").textContent = f(L.epv1_today + L.epv2_today) + " kWh";
+
+  $("soc").textContent = L.soc;
+  const sb = $("socbar"); sb.style.width = Math.min(100, L.soc) + "%";
+  sb.style.background = L.soc < 20 ? "var(--bad)" : L.soc < 40 ? "var(--warn)" : "var(--good)";
+  $("bat_v").textContent = f(L.bat_v, 2) + " V";
+  $("bat_lbl").textContent = L.bat_w > 0 ? "Discharge" : L.bat_w < 0 ? "Charge" : "Daya";
+  $("bat_w").textContent = f(Math.abs(L.bat_w), 0) + " W";
+  $("acchr_w").textContent = f(L.acchr_w, 0) + " W";
+
+  $("out_w").textContent = f(L.out_w, 0);
+  $("loadbar").style.width = Math.min(100, L.load_pct) + "%";
+  $("load_pct").textContent = f(L.load_pct) + " %";
+  $("out_va2").textContent = `${f(L.out_v)} V · ${f(L.out_a)} A`;
+  $("out_va").textContent = f(L.out_va, 0) + " VA";
+
+  $("grid_v").textContent = f(L.grid_v);
+  $("grid_hz").textContent = f(L.grid_hz, 2) + " Hz";
+  $("acin_w").textContent = f(L.acin_w, 0) + " W";
+  $("acchr_kwh").textContent = f(L.acchr_kwh_today) + " kWh";
+
+  $("inv_temp").textContent = f(L.inv_temp);
+  $("dcdc_temp").textContent = f(L.dcdc_temp) + " °C";
+  $("buck_t").textContent = `${f(L.buck1_temp)} / ${f(L.buck2_temp)} °C`;
+  $("fans").textContent = `${L.mppt_fan}% / ${L.inv_fan}%`;
+
+  const bad = L.fault || L.warning;
+  $("faultmain").innerHTML = bad ? `<span class="ok" style="color:var(--bad)">Ada gangguan</span>` : `<span style="color:var(--good)">Normal</span>`;
+  $("fault").textContent = "0x" + L.fault.toString(16).toUpperCase() + (L.fault_val ? ` (nilai ${L.fault_val})` : "");
+  $("warning").textContent = "0x" + L.warning.toString(16).toUpperCase() + (L.warning_val ? ` (nilai ${L.warning_val})` : "");
+}
+
+/* ---------------- settings ---------------- */
+const built = {};
+function paintSettings(list) {
+  const box = $("settings"), ro = $("readonly");
+  for (const s of list) {
+    if (!s.writable) {
+      let el = $("ro" + s.reg);
+      if (!el) {
+        el = document.createElement("div"); el.className = "row"; el.id = "ro" + s.reg;
+        el.innerHTML = `<span>${s.label}</span><b></b>`; ro.appendChild(el);
+      }
+      el.lastChild.textContent = s.display === null ? "-" : s.display + (s.unit && s.type === "number" ? " " + s.unit : "");
+      continue;
+    }
+    let el = built[s.reg];
+    if (!el) {
+      el = document.createElement("div"); el.className = "set" + (s.danger ? " danger" : "");
+      let ctl;
+      if (s.type === "enum") {
+        ctl = `<select>` + Object.entries(s.options).map(([k, v]) => `<option value="${k}">${v}</option>`).join("") + `</select>`;
+      } else {
+        ctl = `<input type="number" min="${s.min}" max="${s.max}" step="${s.scale < 1 ? 0.1 : 1}"> <span class="cur">${s.unit}</span>`;
+      }
+      el.innerHTML = `<div class="top"><span class="name">${s.label}</span><span class="cur"></span></div>
+        <div class="ctl">${ctl}<button>Terapkan</button></div>
+        <div class="hint">${s.type === "number" ? `Rentang ${s.min} - ${s.max} ${s.unit}` : ""}</div>`;
+      const input = el.querySelector("select, input"); input.dataset.dirty = "";
+      input.addEventListener("input", () => input.dataset.dirty = "1");
+      el.querySelector("button").addEventListener("click", () => apply(s, input, el.querySelector("button")));
+      box.appendChild(el); built[s.reg] = el;
+    }
+    el.querySelector(".top .cur").textContent = s.display === null ? "menunggu data..." : "Saat ini: " + s.display + (s.type === "number" ? " " + s.unit : "");
+    const input = el.querySelector("select, input");
+    if (!input.dataset.dirty && s.raw !== null) input.value = s.type === "enum" ? s.raw : s.display;
+  }
+}
+
+async function apply(s, input, btn) {
+  const val = Number(input.value);
+  if (input.value === "" || Number.isNaN(val)) return alert("Isi nilainya dulu.");
+  const shown = s.type === "enum" ? s.options[val] : val + " " + s.unit;
+  let msg = `Ubah "${s.label}" menjadi ${shown}?`;
+  if (s.danger) msg += "\n\nSetingan ini mempengaruhi charge/baterai. Pastikan nilainya sesuai spesifikasi baterai.";
+  if (!confirm(msg)) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reg: s.reg, value: val }) });
+    const j = await r.json();
+    if (!r.ok) alert(j.detail || "Gagal");
+    else input.dataset.dirty = "";
+  } catch (e) { alert("Gagal menghubungi server"); }
+  btn.disabled = false;
+  loadCommands();
+}
+
+/* ---------------- log ---------------- */
+async function loadCommands() {
+  const j = await (await fetch("/api/commands")).json();
+  const rows = [];
+  for (const c of j.current.filter(c => c.status === "menunggu" || c.status === "dikirim")) {
+    rows.push(`<tr><td>sekarang</td><td>${c.label}</td><td>${c.old_shown ?? "-"}</td><td>${c.shown}</td><td class="${c.status}">${c.status}</td><td></td></tr>`);
+  }
+  for (const a of j.audit) {
+    const t = new Date(a.ts * 1000).toLocaleString("id-ID");
+    rows.push(`<tr><td>${t}</td><td>${a.label}</td><td>${a.old}</td><td>${a.new}</td><td class="${a.status}">${a.status}</td><td>${a.detail || ""}</td></tr>`);
+  }
+  $("audit").innerHTML = rows.join("") || `<tr><td colspan="6" style="color:var(--muted)">Belum ada perubahan.</td></tr>`;
+}
+
+/* ---------------- chart ---------------- */
+let chart;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+async function loadHistory() {
+  const data = await (await fetch("/api/history?minutes=" + $("range").value)).json();
+  const labels = data.map(r => new Date(r.ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
+  const ds = [
+    { label: "Panel (W)", data: data.map(r => r.pv_w), borderColor: css("--pv"), yAxisID: "w" },
+    { label: "Beban (W)", data: data.map(r => r.load_w), borderColor: css("--load"), yAxisID: "w" },
+    { label: "Baterai (W, + discharge)", data: data.map(r => r.bat_w), borderColor: css("--bat"), yAxisID: "w", hidden: true },
+    { label: "SOC (%)", data: data.map(r => r.soc), borderColor: "#9b59d0", borderDash: [5, 4], yAxisID: "p" },
+  ].map(d => ({ ...d, pointRadius: 0, borderWidth: 2, tension: .25 }));
+  if (!chart) {
+    chart = new Chart($("chart"), { type: "line", data: { labels, datasets: ds }, options: {
+      responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+      scales: {
+        w: { position: "left", title: { display: true, text: "Watt" }, grid: { color: css("--line") } },
+        p: { position: "right", min: 0, max: 100, title: { display: true, text: "%" }, grid: { drawOnChartArea: false } },
+        x: { grid: { color: css("--line") }, ticks: { maxTicksLimit: 10 } } },
+      plugins: { legend: { labels: { usePointStyle: true } } } } });
+  } else {
+    const hidden = chart.data.datasets.map((_, i) => chart.getDatasetMeta(i).hidden);
+    chart.data.labels = labels;
+    ds.forEach((d, i) => { chart.data.datasets[i].data = d.data; });
+    chart.update("none");
+  }
+}
+
+/* ---------------- loop ---------------- */
+async function tick2() {
+  try {
+    const d = await (await fetch("/api/latest")).json();
+    paintLive(d); paintSettings(d.settings);
+  } catch (e) { $("conn").textContent = "server tidak terjangkau"; $("dot").classList.remove("on"); }
+}
+$("range").addEventListener("change", loadHistory);
+tick2(); loadHistory(); loadCommands();
+setInterval(tick2, 3000);
+setInterval(loadCommands, 4000);
+setInterval(loadHistory, 30000);
+</script>
+</body>
+</html>
