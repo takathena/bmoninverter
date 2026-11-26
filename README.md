@@ -1,12 +1,3 @@
-Benar sekali, mohon maaf saya terlewat untuk memperbarui `README.md`-nya di jawaban sebelumnya. Karena kita sekarang menggunakan `.env`, ada perubahan instruksi terutama di bagian *deployment* dan keamanan. 
-
-Berikut adalah **`README.md` versi terbaru** yang sudah disesuaikan dengan konfigurasi `.env`. Silakan timpa file `README.md` Anda dengan kode di bawah ini:
-
----
-
-### 📄 File `README.md` (Terbaru - v1.4 + .env)
-
-```markdown
 # SPF Gateway (v1.4) - Growatt Multi-Inverter Monitoring
 
 Sistem monitoring dan kontrol jarak jauh (IoT) untuk inverter **Growatt SPF** (Off-Grid) menggunakan ESP32 + Modul RS485 (MAX485), dengan server Python (FastAPI) yang berjalan di dalam Docker.
@@ -183,10 +174,3 @@ Anda bisa mengubah mode pengisian baterai (PV/PLN), jam operasional PLN, dan bat
 *   **v1.3:** Otomatisasi SOC & Notifikasi Telegram.
 *   **v1.2:** Keamanan API Key & Basic Auth.
 *   **v1.1:** Keandalan Watchdog, Auto-Reconnect, & Retry.
-
-> ⚠️ **PENTING:** Jangan pernah meng-upload file `.env` ke repositori publik (seperti GitHub). File ini berisi password dan kunci rahasia Anda.
-```
-
----
-
-Dengan pembaruan ini, dokumentasi sudah 100% selaras dengan kode terbaru. Anda tinggal membuat file `.env`, menjalankan Docker, dan semuanya akan berjalan dengan aman tanpa ada *password* yang tertulis di dalam kode (`server.py`).
