@@ -3,253 +3,297 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Growatt SPF v1.4 (Multi-Inverter)</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<title>SPF Gateway v1.5</title>
+<!-- Apache ECharts -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
-  :root { --bg:#f4f6f8; --card:#ffffff; --text:#1c2430; --muted:#6b7686; --line:#e3e8ee; --accent:#2f7df6; --good:#1fa86a; --warn:#e8a317; --bad:#e04848; --pv:#f5a524; --load:#2f7df6; --bat:#1fa86a; --grid:#9b59d0; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0f141b; --card:#171e28; --text:#e6ebf2; --muted:#8a96a8; --line:#273141; } }
-  * { box-sizing:border-box; }
-  body { margin:0; font:14px/1.45 system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); }
-  header { display:flex; align-items:center; gap:14px; padding:14px 22px; border-bottom:1px solid var(--line); background:var(--card); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; font-weight:650; }
-  .pill { display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:99px; background:var(--bg); border:1px solid var(--line); font-size:13px; }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); }
-  .dot.on { background:var(--good); box-shadow:0 0 0 4px color-mix(in srgb,var(--good) 22%,transparent); }
-  .spacer { flex:1; }
-  main { max-width:1280px; margin:0 auto; padding:20px; display:grid; gap:16px; }
-  .grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
-  .card h2 { margin:0 0 10px; font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:650; }
-  .big { font-size:34px; font-weight:700; letter-spacing:-.02em; line-height:1.1; }
-  .big small { font-size:15px; font-weight:500; color:var(--muted); margin-left:4px; }
-  .rows { margin-top:12px; display:grid; gap:5px; }
-  .row { display:flex; justify-content:space-between; color:var(--muted); }
-  .row b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
-  .bar { height:10px; border-radius:99px; background:var(--bg); border:1px solid var(--line); overflow:hidden; margin-top:12px; }
-  .bar > i { display:block; height:100%; width:0; background:var(--good); transition:width .6s, background .6s; }
-  .wide { grid-column:1/-1; }
-  .chartbox { height:300px; position:relative; }
-  select, input[type=number], button { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 10px; }
-  button { cursor:pointer; background:var(--accent); color:#fff; border:0; font-weight:600; }
-  button.ghost { background:var(--bg); color:var(--text); border:1px solid var(--line); }
-  button.btn-csv { background:var(--good); }
-  .settings { display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); }
-  .set { border:1px solid var(--line); border-radius:10px; padding:11px 13px; display:grid; gap:8px; }
-  .set .top { display:flex; justify-content:space-between; gap:10px; }
-  .set .name { font-weight:600; }
-  .set .cur { color:var(--muted); font-variant-numeric:tabular-nums; }
-  .set .ctl { display:flex; gap:8px; align-items:center; }
-  .set .ctl input { width:110px; } .set .ctl select { flex:1; }
-  .danger .name::after { content:"hati-hati"; margin-left:8px; font-size:11px; color:var(--warn); font-weight:600; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
-  th { color:var(--muted); font-weight:600; font-size:12px; }
-  .ok, .otomatis { color:var(--good); } .gagal,.timeout { color:var(--bad); } .menunggu,.dikirim { color:var(--warn); }
-  #banner { display:none; padding:10px 14px; border-radius:10px; background:color-mix(in srgb,var(--bad) 14%,var(--card)); border:1px solid var(--bad); }
+  :root {
+    --bg: #f4f4f4; --panel: #ffffff; --text: #111111; --text-muted: #555555; 
+    --border: #111111; --border-light: #cccccc;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Courier New", Courier, monospace; }
+  body { background: var(--bg); color: var(--text); font-size: 13px; }
+  
+  /* Layout */
+  header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .header-title { font-weight: bold; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; }
+  .header-controls { display: flex; gap: 15px; align-items: center; }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; display: grid; gap: 15px; }
+  
+  /* Grid System */
+  .grid-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+  .grid-panels { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; }
+  
+  /* Cards & Panels (Sharp & Monochrome) */
+  .panel { background: var(--panel); border: 1px solid var(--border); padding: 15px; }
+  .panel-title { font-size: 11px; text-transform: uppercase; font-weight: bold; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; margin-bottom: 12px; color: var(--text-muted); }
+  
+  /* Data Rows */
+  .big-val { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
+  .big-val small { font-size: 14px; font-weight: normal; color: var(--text-muted); }
+  .data-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted var(--border-light); }
+  .data-row:last-child { border-bottom: none; }
+  .data-row span { color: var(--text-muted); }
+  .data-row b { font-weight: bold; }
+  
+  /* Buttons & Inputs */
+  button, select, input { font-family: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 5px 10px; outline: none; }
+  button { cursor: pointer; text-transform: uppercase; font-weight: bold; background: var(--panel); }
+  button:hover { background: #ddd; }
+  button.primary { background: var(--text); color: var(--panel); }
+  button.primary:hover { background: #333; }
+  .indicator { display: inline-block; width: 8px; height: 8px; border: 1px solid var(--border); background: var(--bg); margin-right: 5px; }
+  .indicator.on { background: var(--border); }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
+  th { text-transform: uppercase; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  
+  /* Charts */
+  #chart { height: 350px; width: 100%; }
+  
+  /* Specific elements */
+  .alert { border: 1px solid var(--border); padding: 10px; background: #e0e0e0; margin-bottom: 15px; display: none; font-weight: bold; }
+  .settings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .setting-item { border: 1px solid var(--border-light); padding: 10px; display: flex; justify-content: space-between; align-items: center; }
+  .setting-item span { font-size: 12px; }
+  .setting-item .controls { display: flex; gap: 5px; }
+  .setting-item input { width: 60px; }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>Growatt SPF 🔒</h1>
-  <label>Inverter:
-    <select id="deviceSelect" onchange="switchDevice()">
-      <option value="">Memuat...</option>
-    </select>
-  </label>
-  <span class="pill"><span class="dot" id="dot"></span><span id="conn">-</span></span>
-  <span class="pill" id="statuspill">-</span>
-  <span class="spacer"></span>
-  <button id="btnAuto" class="ghost" onclick="toggleAuto()">Auto-SOC</button>
-  <button class="btn-csv" onclick="downloadCSV()">📥 CSV</button>
-  <select id="range" onchange="loadHistory()">
-    <option value="30">30 mnt</option>
-    <option value="60" selected>1 jam</option>
-    <option value="360">6 jam</option>
-    <option value="1440">24 jam</option>
-  </select>
+  <div class="header-title">SPF Gateway / Terminal v1.5</div>
+  <div class="header-controls">
+    <div>
+      <span class="indicator" id="ind"></span>
+      <span id="conn-status">OFFLINE</span>
+    </div>
+    <select id="devSelect" onchange="switchDev()"></select>
+    <button onclick="window.location.href='/api/logout'">Logout</button>
+  </div>
 </header>
 
 <main>
-  <div id="banner"></div>
-  <div class="grid">
-    <div class="card"><h2>Panel surya</h2><div class="big"><span id="pv_w">-</span><small>W</small></div><div class="rows"><div class="row"><span>PV1</span><b id="pv1">-</b></div><div class="row"><span>PV2</span><b id="pv2">-</b></div><div class="row"><span>Hari ini</span><b id="pv_kwh">-</b></div></div></div>
-    <div class="card"><h2>Baterai</h2><div class="big"><span id="soc">-</span><small>%</small></div><div class="bar"><i id="socbar"></i></div><div class="rows"><div class="row"><span>Voltase</span><b id="bat_v">-</b></div><div class="row"><span id="bat_lbl">Daya</span><b id="bat_w">-</b></div><div class="row"><span>Charge PLN</span><b id="acchr_w">-</b></div></div></div>
-    <div class="card"><h2>Beban (output)</h2><div class="big"><span id="out_w">-</span><small>W</small></div><div class="bar"><i id="loadbar" style="background:var(--load)"></i></div><div class="rows"><div class="row"><span>Beban</span><b id="load_pct">-</b></div><div class="row"><span>V / A</span><b id="out_va2">-</b></div><div class="row"><span>Daya semu</span><b id="out_va">-</b></div></div></div>
-    <div class="card"><h2>PLN</h2><div class="big"><span id="grid_v">-</span><small>V</small></div><div class="rows"><div class="row"><span>Frekuensi</span><b id="grid_hz">-</b></div><div class="row"><span>Daya masuk</span><b id="acin_w">-</b></div><div class="row"><span>Charge hari ini</span><b id="acchr_kwh">-</b></div></div></div>
-    <div class="card"><h2>Suhu</h2><div class="big"><span id="inv_temp">-</span><small>°C</small></div><div class="rows"><div class="row"><span>DC-DC</span><b id="dcdc_temp">-</b></div><div class="row"><span>Buck 1/2</span><b id="buck_t">-</b></div><div class="row"><span>Kipas</span><b id="fans">-</b></div></div></div>
-    <div class="card"><h2>Gangguan</h2><div class="big" style="font-size:22px" id="faultmain">-</div><div class="rows"><div class="row"><span>Fault</span><b id="fault">-</b></div><div class="row"><span>Warning</span><b id="warning">-</b></div></div></div>
+  <div class="alert" id="alert-banner">KONEKSI KE INVERTER TERPUTUS</div>
+
+  <div class="grid-stats">
+    <div class="panel">
+      <div class="panel-title">Panel Surya (PV)</div>
+      <div class="big-val" id="pv_w">- <small>W</small></div>
+      <div class="data-row"><span>PV1</span><b id="pv1">-</b></div>
+      <div class="data-row"><span>PV2</span><b id="pv2">-</b></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Baterai</div>
+      <div class="big-val" id="soc">- <small>%</small></div>
+      <div class="data-row"><span>Tegangan</span><b id="bat_v">-</b></div>
+      <div class="data-row"><span>Daya</span><b id="bat_w">-</b></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Beban (Output)</div>
+      <div class="big-val" id="out_w">- <small>W</small></div>
+      <div class="data-row"><span>Beban</span><b id="load_pct">- %</b></div>
+      <div class="data-row"><span>Volt / Amp</span><b id="out_va2">-</b></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">PLN (Grid)</div>
+      <div class="big-val" id="grid_v">- <small>V</small></div>
+      <div class="data-row"><span>Frekuensi</span><b id="grid_hz">-</b></div>
+      <div class="data-row"><span>Daya Masuk</span><b id="acin_w">-</b></div>
+    </div>
   </div>
-  <div class="card wide"><h2>Riwayat</h2><div class="chartbox"><canvas id="chart"></canvas></div></div>
-  <div class="card wide"><h2>Pengaturan</h2><div class="settings" id="settings"></div></div>
-  <div class="card wide"><h2>Hanya Baca</h2><div class="grid" id="readonly" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))"></div></div>
-  <div class="card wide"><h2>Log</h2><table><thead><tr><th>Waktu</th><th>Setingan</th><th>Lama</th><th>Baru</th><th>Status</th><th>Ket</th></tr></thead><tbody id="audit"></tbody></table></div>
+
+  <div class="grid-panels">
+    <div class="panel">
+      <div class="panel-title">Riwayat Beban & Baterai</div>
+      <div id="chart"></div>
+    </div>
+    
+    <div class="panel">
+      <div class="panel-title">Kontrol & Status</div>
+      <div class="data-row"><span>Status Sistem</span><b id="sys_status">-</b></div>
+      <div class="data-row"><span>Suhu Inverter</span><b id="inv_temp">- °C</b></div>
+      <div class="data-row"><span>Kode Error</span><b id="fault">-</b></div>
+      <div class="data-row"><span>Auto-SOC</span>
+        <div>
+          <span id="auto_status" style="margin-right: 10px;">-</span>
+          <button onclick="toggleAuto()" id="btn_auto">TOGGLE</button>
+        </div>
+      </div>
+      <div style="margin-top: 15px; display: flex; gap: 5px;">
+        <select id="range" onchange="loadHistory()">
+          <option value="30">30 MNT</option>
+          <option value="60" selected>1 JAM</option>
+          <option value="360">6 JAM</option>
+          <option value="1440">24 JAM</option>
+        </select>
+        <button onclick="downloadCSV()" class="primary" style="flex: 1;">UNDUH CSV</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Pengaturan Inverter</div>
+    <div class="settings-grid" id="settingsBox"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Log Perubahan (Audit)</div>
+    <table>
+      <thead><tr><th>Waktu</th><th>Setingan</th><th>Lama</th><th>Baru</th><th>Status</th><th>Keterangan</th></tr></thead>
+      <tbody id="auditBody"></tbody>
+    </table>
+  </div>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
-const STATUS = {0:"Standby",2:"Discharge",3:"Fault",4:"Update FW",5:"Charge PV",6:"Charge PLN",7:"Charge Gabungan",8:"Charge Gab + Bypass",9:"Charge PV + Bypass",10:"Charge PLN + Bypass",11:"Bypass",12:"Charge PV + Discharge"};
+const STATUS = {0:"STANDBY",2:"DISCHARGE",3:"FAULT",4:"UPDATE",5:"CHG PV",6:"CHG PLN",7:"CHG GAB",8:"CHG GAB+BYP",9:"CHG PV+BYP",10:"CHG PLN+BYP",11:"BYPASS",12:"CHG PV+DIS"};
 const f = (v, d=1) => (v === null || v === undefined) ? "-" : Number(v).toFixed(d);
-let currentDevice = "";
+let currentDev = "";
 
-async function secureFetch(url, options = {}) {
-  const r = await fetch(url, options);
-  if (r.status === 401) { alert("Sesi habis."); window.location.reload(); throw new Error("401"); }
-  if (!r.ok) throw new Error("HTTP " + r.status);
+async function api(url, opt = {}) {
+  const r = await fetch(url, opt);
+  if (r.status === 401) { window.location.href = "/login"; throw new Error("401"); }
   return r;
 }
 
 async function loadDevices() {
+  const devs = await (await api("/api/devices")).json();
+  const sel = $("devSelect");
+  sel.innerHTML = devs.map(d => `<option value="${d.id}">${d.id.toUpperCase()}</option>`).join("");
+  if (devs.length > 0 && !currentDev) { currentDev = devs[0].id; sel.value = currentDev; }
+}
+
+function switchDev() {
+  currentDev = $("devSelect").value;
+  updateLive(); loadHistory(); loadLogs();
+}
+
+async function updateLive() {
+  if (!currentDev) { await loadDevices(); if (!currentDev) return; }
   try {
-    const devs = await (await secureFetch("/api/devices")).json();
-    const sel = $("deviceSelect");
-    sel.innerHTML = devs.map(d => `<option value="${d.id}">${d.id} ${d.online ? '🟢' : '🔴'}</option>`).join("");
-    if (devs.length > 0 && !currentDevice) {
-      currentDevice = devs[0].id;
-      sel.value = currentDevice;
-    }
-  } catch(e) {}
+    const d = await (await api(`/api/latest?device_id=${currentDev}`)).json();
+    
+    // Status Indikator
+    $("ind").className = "indicator" + (d.online ? " on" : "");
+    $("conn-status").textContent = d.online ? "ONLINE" : "OFFLINE";
+    $("alert-banner").style.display = (d.online && !d.inverter_ok) ? "block" : "none";
+    
+    // Tombol Auto SOC
+    $("auto_status").textContent = d.auto_soc ? "AKTIF" : "MATI";
+
+    const L = d.live; if (!L) return;
+    
+    // Kartu Data
+    $("pv_w").innerHTML = `${f(L.pv1_w + L.pv2_w, 0)} <small>W</small>`;
+    $("pv1").textContent = `${f(L.pv1_v)}V / ${f(L.pv1_a)}A`;
+    $("pv2").textContent = `${f(L.pv2_v)}V / ${f(L.pv2_a)}A`;
+    
+    $("soc").innerHTML = `${L.soc} <small>%</small>`;
+    $("bat_v").textContent = `${f(L.bat_v, 2)} V`;
+    $("bat_w").textContent = `${f(Math.abs(L.bat_w), 0)} W (${L.bat_w > 0 ? "DIS" : "CHG"})`;
+    
+    $("out_w").innerHTML = `${f(L.out_w, 0)} <small>W</small>`;
+    $("load_pct").textContent = `${f(L.load_pct)} %`;
+    $("out_va2").textContent = `${f(L.out_v)}V / ${f(L.out_a)}A`;
+    
+    $("grid_v").innerHTML = `${f(L.grid_v)} <small>V</small>`;
+    $("grid_hz").textContent = `${f(L.grid_hz, 2)} Hz`;
+    $("acin_w").textContent = `${f(L.acin_w, 0)} W`;
+    
+    // Panel Kanan
+    $("sys_status").textContent = STATUS[L.status] || L.status;
+    $("inv_temp").textContent = `${f(L.inv_temp)} °C`;
+    $("fault").textContent = L.fault ? `0x${L.fault.toString(16).toUpperCase()}` : "NONE";
+    
+    renderSettings(d.settings);
+  } catch (e) {}
 }
 
-function switchDevice() {
-  currentDevice = $("deviceSelect").value;
-  tick2(); loadHistory(); loadCommands();
+const elCache = {};
+function renderSettings(list) {
+  const box = $("settingsBox");
+  list.forEach(s => {
+    if (!s.writable) return;
+    if (!elCache[s.reg]) {
+      const div = document.createElement("div"); div.className = "setting-item";
+      let inp = s.type === "enum" 
+        ? `<select>${Object.entries(s.options).map(([k,v]) => `<option value="${k}">${v}</option>`).join("")}</select>`
+        : `<input type="number" min="${s.min}" max="${s.max}" step="${s.scale<1?0.1:1}">`;
+      div.innerHTML = `<span>${s.label}</span><div class="controls">${inp}<button>SET</button></div>`;
+      
+      const ctrl = div.querySelector("select, input");
+      ctrl.oninput = () => ctrl.dataset.dirty = "1";
+      
+      div.querySelector("button").onclick = () => applySetting(s, ctrl);
+      box.appendChild(div); elCache[s.reg] = div;
+    }
+    const ctrl = elCache[s.reg].querySelector("select, input");
+    if (!ctrl.dataset.dirty && s.raw !== null) ctrl.value = s.type === "enum" ? s.raw : s.display;
+  });
 }
 
-function paintLive(d) {
-  $("dot").classList.toggle("on", d.online);
-  $("conn").textContent = d.online ? "Online" : "Offline";
-  $("banner").style.display = (d.online && !d.inverter_ok) ? "block" : "none";
-  if (d.online && !d.inverter_ok) $("banner").textContent = "Inverter tidak menjawab: " + (d.error || "?");
-  $("btnAuto").textContent = "Auto-SOC: " + (d.auto_soc ? "Aktif 🟢" : "Mati 🔴");
-  
-  const L = d.live; if (!L) return;
-  $("statuspill").textContent = STATUS[L.status] ?? ("Status " + L.status);
-  $("pv_w").textContent = f(L.pv1_w + L.pv2_w, 0);
-  $("pv1").textContent = `${f(L.pv1_v)}V · ${f(L.pv1_a)}A · ${f(L.pv1_w,0)}W`;
-  $("pv2").textContent = `${f(L.pv2_v)}V · ${f(L.pv2_a)}A · ${f(L.pv2_w,0)}W`;
-  $("pv_kwh").textContent = f(L.epv1_today + L.epv2_today) + " kWh";
-  $("soc").textContent = L.soc;
-  $("socbar").style.width = Math.min(100, L.soc) + "%";
-  $("socbar").style.background = L.soc < 20 ? "var(--bad)" : L.soc < 40 ? "var(--warn)" : "var(--good)";
-  $("bat_v").textContent = f(L.bat_v, 2) + " V";
-  $("bat_lbl").textContent = L.bat_w > 0 ? "Discharge" : L.bat_w < 0 ? "Charge" : "Daya";
-  $("bat_w").textContent = f(Math.abs(L.bat_w), 0) + " W";
-  $("acchr_w").textContent = f(L.acchr_w, 0) + " W";
-  $("out_w").textContent = f(L.out_w, 0);
-  $("loadbar").style.width = Math.min(100, L.load_pct) + "%";
-  $("load_pct").textContent = f(L.load_pct) + " %";
-  $("out_va2").textContent = `${f(L.out_v)}V · ${f(L.out_a)}A`;
-  $("out_va").textContent = f(L.out_va, 0) + " VA";
-  $("grid_v").textContent = f(L.grid_v);
-  $("grid_hz").textContent = f(L.grid_hz, 2) + " Hz";
-  $("acin_w").textContent = f(L.acin_w, 0) + " W";
-  $("acchr_kwh").textContent = f(L.acchr_kwh_today) + " kWh";
-  $("inv_temp").textContent = f(L.inv_temp);
-  $("dcdc_temp").textContent = f(L.dcdc_temp) + " °C";
-  $("buck_t").textContent = `${f(L.buck1_temp)} / ${f(L.buck2_temp)} °C`;
-  $("fans").textContent = `${L.mppt_fan}% / ${L.inv_fan}%`;
-  $("faultmain").innerHTML = (L.fault || L.warning) ? `<span style="color:var(--bad)">Ada gangguan</span>` : `<span style="color:var(--good)">Normal</span>`;
-  $("fault").textContent = "0x" + L.fault.toString(16).toUpperCase();
-  $("warning").textContent = "0x" + L.warning.toString(16).toUpperCase();
-}
-
-const built = {};
-function paintSettings(list) {
-  const box = $("settings"), ro = $("readonly");
-  for (const s of list) {
-    if (!s.writable) {
-      let el = $("ro" + s.reg);
-      if (!el) { el = document.createElement("div"); el.className = "row"; el.id = "ro" + s.reg; el.innerHTML = `<span>${s.label}</span><b></b>`; ro.appendChild(el); }
-      el.lastChild.textContent = s.display === null ? "-" : s.display + (s.unit && s.type === "number" ? " " + s.unit : "");
-      continue;
-    }
-    let el = built[s.reg];
-    if (!el) {
-      el = document.createElement("div"); el.className = "set" + (s.danger ? " danger" : "");
-      let ctl = s.type === "enum" ? `<select>` + Object.entries(s.options).map(([k, v]) => `<option value="${k}">${v}</option>`).join("") + `</select>` : `<input type="number" min="${s.min}" max="${s.max}" step="${s.scale < 1 ? 0.1 : 1}"> <span class="cur">${s.unit}</span>`;
-      el.innerHTML = `<div class="top"><span class="name">${s.label}</span><span class="cur"></span></div><div class="ctl">${ctl}<button>Terapkan</button></div>`;
-      const input = el.querySelector("select, input"); input.dataset.dirty = "";
-      input.addEventListener("input", () => input.dataset.dirty = "1");
-      el.querySelector("button").addEventListener("click", () => apply(s, input, el.querySelector("button")));
-      box.appendChild(el); built[s.reg] = el;
-    }
-    el.querySelector(".top .cur").textContent = "Saat ini: " + (s.display || "-") + (s.type === "number" ? " " + s.unit : "");
-    const input = el.querySelector("select, input");
-    if (!input.dataset.dirty && s.raw !== null) input.value = s.type === "enum" ? s.raw : s.display;
-  }
+async function applySetting(s, ctrl) {
+  const val = Number(ctrl.value);
+  if (!confirm(`Ubah ${s.label} ke ${val}?`)) return;
+  try {
+    await api("/api/settings", {
+      method: "POST", headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ device_id: currentDev, reg: s.reg, value: val })
+    });
+    ctrl.dataset.dirty = "";
+    loadLogs();
+  } catch (e) { alert("Gagal mengirim perintah"); }
 }
 
 async function toggleAuto() {
-  const isActive = $("btnAuto").textContent.includes("Aktif");
-  $("btnAuto").disabled = true;
-  try { await secureFetch(`/api/automation?enabled=${!isActive}`, { method: "POST" }); tick2(); } catch(e) {}
-  $("btnAuto").disabled = false;
+  const isAct = $("auto_status").textContent === "AKTIF";
+  await api(`/api/automation?enabled=${!isAct}`, { method: "POST" });
+  updateLive();
 }
 
-async function apply(s, input, btn) {
-  const val = Number(input.value);
-  if (input.value === "" || Number.isNaN(val)) return alert("Isi nilai");
-  if (!confirm(`Ubah "${s.label}" menjadi ${s.type === "enum" ? s.options[val] : val + " " + s.unit}?`)) return;
-  btn.disabled = true;
-  try {
-    const r = await secureFetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ device_id: currentDevice, reg: s.reg, value: val }) });
-    if (!r.ok) { const j = await r.json(); alert(j.detail || "Gagal"); } else input.dataset.dirty = "";
-  } catch (e) {}
-  btn.disabled = false; loadCommands();
+async function loadLogs() {
+  const j = await (await api(`/api/commands?device_id=${currentDev}`)).json();
+  const rows = [];
+  j.current.forEach(c => rows.push(`<tr><td>SEKARANG</td><td>${c.label}</td><td>-</td><td>${c.shown}</td><td>${c.status.toUpperCase()}</td><td>${c.detail}</td></tr>`));
+  j.audit.forEach(a => rows.push(`<tr><td>${new Date(a.ts*1000).toLocaleTimeString()}</td><td>${a.label}</td><td>${a.old}</td><td>${a.new}</td><td>${a.status.toUpperCase()}</td><td>${a.detail || "-"}</td></tr>`));
+  $("auditBody").innerHTML = rows.join("") || `<tr><td colspan="6">TIDAK ADA LOG</td></tr>`;
 }
 
-async function loadCommands() {
-  if (!currentDevice) return;
-  try {
-    const j = await (await secureFetch("/api/commands?device_id=" + currentDevice)).json();
-    const rows = [];
-    for (const c of j.current.filter(c => c.status === "menunggu" || c.status === "dikirim")) rows.push(`<tr><td>Skrg</td><td>${c.label}</td><td>${c.old_shown ?? "-"}</td><td>${c.shown}</td><td class="${c.status}">${c.status}</td><td>${c.detail}</td></tr>`);
-    for (const a of j.audit) rows.push(`<tr><td>${new Date(a.ts * 1000).toLocaleString("id-ID")}</td><td>${a.label}</td><td>${a.old}</td><td>${a.new}</td><td class="${a.status}">${a.status}</td><td>${a.detail || ""}</td></tr>`);
-    $("audit").innerHTML = rows.join("") || `<tr><td colspan="6" style="color:var(--muted)">Kosong.</td></tr>`;
-  } catch(e) {}
-}
+// ================= ECHARTS =================
+let myChart = echarts.init($("chart"), null, { renderer: 'svg' });
+window.addEventListener('resize', () => myChart.resize());
 
-let chart;
-const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 async function loadHistory() {
-  if (!currentDevice) return;
-  try {
-    const data = await (await secureFetch(`/api/history?minutes=${$("range").value}&device_id=${currentDevice}`)).json();
-    const labels = data.map(r => new Date(r.ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
-    const ds = [
-      { label: "PV (W)", data: data.map(r => r.pv_w), borderColor: css("--pv"), yAxisID: "w" },
-      { label: "Beban (W)", data: data.map(r => r.load_w), borderColor: css("--load"), yAxisID: "w" },
-      { label: "Baterai (W)", data: data.map(r => r.bat_w), borderColor: css("--bat"), yAxisID: "w", hidden: true },
-      { label: "SOC (%)", data: data.map(r => r.soc), borderColor: "#9b59d0", borderDash: [5, 4], yAxisID: "p" },
-    ].map(d => ({ ...d, pointRadius: 0, borderWidth: 2, tension: .25 }));
-    if (!chart) {
-      chart = new Chart($("chart"), { type: "line", data: { labels, datasets: ds }, options: {
-        responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
-        scales: { w: { position: "left", grid: { color: css("--line") } }, p: { position: "right", min: 0, max: 100, grid: { drawOnChartArea: false } }, x: { grid: { color: css("--line") }, ticks: { maxTicksLimit: 10 } } },
-        plugins: { legend: { labels: { usePointStyle: true } } } } });
-    } else {
-      chart.data.labels = labels;
-      ds.forEach((d, i) => { chart.data.datasets[i].data = d.data; });
-      chart.update("none");
-    }
-  } catch(e) {}
+  const data = await (await api(`/api/history?minutes=${$("range").value}&device_id=${currentDev}`)).json();
+  const times = data.map(r => new Date(r.ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
+  
+  myChart.setOption({
+    animation: false,
+    grid: { top: 30, right: 30, bottom: 30, left: 50 },
+    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#111', borderWidth: 1, textStyle: { color: '#111', fontFamily: 'Courier New' } },
+    legend: { data: ['PV (W)', 'Beban (W)', 'SOC (%)'], textStyle: { color: '#111', fontFamily: 'Courier New' } },
+    xAxis: { type: 'category', data: times, axisLine: { lineStyle: { color: '#111' } }, axisLabel: { color: '#555' } },
+    yAxis: [
+      { type: 'value', splitLine: { lineStyle: { type: 'dashed', color: '#ccc' } }, axisLine: { lineStyle: { color: '#111' } } },
+      { type: 'value', min: 0, max: 100, splitLine: { show: false }, axisLine: { lineStyle: { color: '#111' } } }
+    ],
+    series: [
+      { name: 'PV (W)', type: 'line', data: data.map(r => r.pv_w), showSymbol: false, lineStyle: { color: '#111', width: 2 } },
+      { name: 'Beban (W)', type: 'line', data: data.map(r => r.load_w), showSymbol: false, lineStyle: { color: '#666', width: 2 } },
+      { name: 'SOC (%)', type: 'line', yAxisIndex: 1, data: data.map(r => r.soc), showSymbol: false, lineStyle: { type: 'dashed', color: '#999', width: 2 } }
+    ]
+  });
 }
 
-async function tick2() {
-  if (!currentDevice) { await loadDevices(); if (!currentDevice) return; }
-  try {
-    const d = await (await secureFetch("/api/latest?device_id=" + currentDevice)).json();
-    paintLive(d); paintSettings(d.settings);
-  } catch (e) { $("conn").textContent = "Terputus"; $("dot").classList.remove("on"); }
-}
+function downloadCSV() { window.open(`/api/export?minutes=${$("range").value}&device_id=${currentDev}`, "_blank"); }
 
-function downloadCSV() {
-  if (!currentDevice) return;
-  window.open(`/api/export?minutes=${$("range").value}&device_id=${currentDevice}`, "_blank");
-}
-
-loadDevices().then(() => { tick2(); loadHistory(); loadCommands(); });
-setInterval(() => { tick2(); loadCommands(); }, 3000);
+loadDevices().then(() => { updateLive(); loadHistory(); loadLogs(); });
+setInterval(() => { updateLive(); loadLogs(); }, 3000);
 setInterval(loadHistory, 30000);
 </script>
 </body>
