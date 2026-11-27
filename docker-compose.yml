@@ -1,8 +1,8 @@
 version: '3.8'
 services:
-  spf-gateway:
+  bmoninverter:
     build: .
-    container_name: growatt-server
+    container_name: bmoninverter
     ports:
       - "${SERVER_PORT:-8000}:8000"
     volumes:
