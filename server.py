@@ -2,9 +2,8 @@ import json, sqlite3, threading, time, secrets, csv, io, urllib.request, urllib.
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query, Depends, Header, Request, Response, Form
+from fastapi import FastAPI, HTTPException, Query, Depends, Header, Cookie, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -27,40 +26,54 @@ SOC_LOW_THRESHOLD = int(os.getenv("SOC_LOW_THRESHOLD", 30))
 SOC_HIGH_THRESHOLD = int(os.getenv("SOC_HIGH_THRESHOLD", 85))
 # =====================================================
 
-# State untuk sesi login
 active_sessions = set()
-last_alert_time = 0
+last_alert_time = 0.0
 
-def verify_session(token: Optional[str]):
-    if not token or token not in active_sessions:
+
+def verify_session(session_token: Optional[str] = Cookie(None)):
+    if not session_token or session_token not in active_sessions:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    return token
+    return session_token
+
 
 def verify_api_key(x_api_key: str = Header(...)):
-    if x_api_key != API_KEY: raise HTTPException(status_code=401, detail="API Key invalid")
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="API Key invalid")
     return x_api_key
 
-def send_telegram(msg: str):
-    global last_alert_time
-    if time.time() - last_alert_time < 300 or not TELEGRAM_TOKEN: return
+
+def _tg_send(msg: str):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        urllib.request.urlopen(urllib.request.Request(url, data=urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": msg}).encode()), timeout=5)
-        last_alert_time = time.time()
-    except Exception as e: print("Telegram error:", e)
+        data = urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": msg}).encode()
+        urllib.request.urlopen(urllib.request.Request(url, data=data), timeout=5)
+    except Exception as e:
+        print("Telegram error:", e)
+
+
+def send_telegram(msg: str):
+    """Jalan di thread terpisah supaya tidak memblokir ingest."""
+    global last_alert_time
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID: return
+    if time.time() - last_alert_time < 300: return
+    last_alert_time = time.time()
+    threading.Thread(target=_tg_send, args=(msg,), daemon=True).start()
+
 
 SETTINGS: List[Dict[str, Any]] = [
     {"reg": 1, "key": "output_cfg", "label": "Prioritas Output", "type": "enum", "writable": True, "options": {0: "Baterai", 1: "Panel", 2: "PLN"}},
     {"reg": 2, "key": "charge_cfg", "label": "Sumber Charge", "type": "enum", "writable": True, "options": {0: "Panel", 1: "Panel + PLN", 2: "Panel Saja"}},
     {"reg": 3, "key": "uti_out_start", "label": "Jam Mulai PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
     {"reg": 4, "key": "uti_out_end", "label": "Jam Selesai PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
-    {"reg": 34, "key": "max_chg_a", "label": "Arus Charge Maks", "type": "number", "writable": True, "min": 10, "max": 130, "scale": 1, "unit": "A", "danger": True},
-    {"reg": 35, "key": "bulk_v", "label": "Tegangan Bulk", "type": "number", "writable": True, "min": 50.0, "max": 58.0, "scale": 0.1, "unit": "V", "danger": True},
-    {"reg": 36, "key": "float_v", "label": "Tegangan Float", "type": "number", "writable": True, "min": 50.0, "max": 56.0, "scale": 0.1, "unit": "V", "danger": True},
+    {"reg": 34, "key": "max_chg_a", "label": "Ampere Charge Maks", "type": "number", "writable": True, "min": 10, "max": 130, "scale": 1, "unit": "A", "danger": True},
+    {"reg": 35, "key": "bulk_v", "label": "Voltase Bulk", "type": "number", "writable": True, "min": 50.0, "max": 58.0, "scale": 0.1, "unit": "V", "danger": True},
+    {"reg": 36, "key": "float_v", "label": "Voltase Float", "type": "number", "writable": True, "min": 50.0, "max": 56.0, "scale": 0.1, "unit": "V", "danger": True},
 ]
 SETTINGS_BY_REG = {s["reg"]: s for s in SETTINGS}
 
-lock = threading.Lock()
+# RLock: audit() dipanggil dari dalam ingest() yang sudah memegang lock.
+# Lock biasa = deadlock, RLock aman.
+lock = threading.RLock()
 states: Dict[str, Dict[str, Any]] = {}
 commands: Dict[int, Dict[str, Any]] = {}
 next_cmd_id = 1
@@ -68,14 +81,18 @@ next_cmd_id = 1
 db = sqlite3.connect(DB_PATH, check_same_thread=False)
 db.execute("CREATE TABLE IF NOT EXISTS readings (device_id TEXT, ts INTEGER, pv_w REAL, load_w REAL, bat_v REAL, soc REAL, bat_w REAL, grid_v REAL, inv_temp REAL)")
 db.execute("CREATE TABLE IF NOT EXISTS audit (device_id TEXT, ts INTEGER, reg INTEGER, label TEXT, old TEXT, new TEXT, status TEXT, detail TEXT)")
+db.execute("CREATE INDEX IF NOT EXISTS idx_readings ON readings (device_id, ts)")
 db.commit()
+
 
 def audit(dev_id: str, reg: int, label: str, old: Any, new: Any, status: str, detail: str = ""):
     with lock:
         db.execute("INSERT INTO audit VALUES (?,?,?,?,?,?,?,?)", (dev_id, int(time.time()), reg, label, str(old), str(new), status, detail))
         db.commit()
 
+
 app = FastAPI(title="SPF Gateway v1.5")
+
 
 class Ingest(BaseModel):
     device: str
@@ -86,10 +103,12 @@ class Ingest(BaseModel):
     holding: Optional[Dict[str, int]] = None
     results: List[Dict[str, Any]] = []
 
+
 class SettingIn(BaseModel):
     device_id: str
     reg: int
     value: float
+
 
 def fmt_value(s, raw):
     if raw is None: return None
@@ -97,14 +116,15 @@ def fmt_value(s, raw):
     v = raw * s.get("scale", 1)
     return round(v, 1) if s.get("scale", 1) != 1 else int(v)
 
+
 def process_automation(dev_id: str, L: dict, h: dict):
+    global next_cmd_id
     if not AUTO_SOC_ENABLED: return
     soc, current_cfg = L.get("soc"), h.get(2)
     if soc is None or current_cfg is None: return
     for c in commands.values():
         if c["device_id"] == dev_id and c["reg"] == 2 and c["status"] in ("menunggu", "dikirim"): return
 
-    global next_cmd_id
     target = None
     if soc < SOC_LOW_THRESHOLD and current_cfg != 1:
         target = 1
@@ -119,35 +139,45 @@ def process_automation(dev_id: str, L: dict, h: dict):
         commands[cid] = {"id": cid, "device_id": dev_id, "reg": 2, "label": s["label"], "value": target, "old_raw": current_cfg, "status": "menunggu", "detail": "Auto-SOC", "created_at": time.time(), "shown": fmt_value(s, target), "old_shown": fmt_value(s, current_cfg)}
         audit(dev_id, 2, s["label"], fmt_value(s, current_cfg), fmt_value(s, target), "otomatis", "Trigger SOC")
 
+
 # --- AUTENTIKASI & HALAMAN ---
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "devices": list(states.keys())}
+
+
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request, error: int = 0):
+def login_page(error: int = 0):
     return (BASE / "login.html").read_text(encoding="utf-8").replace("{{error}}", "block" if error else "none")
 
+
 @app.post("/api/login")
-def do_login(response: Response, username: str = Form(...), password: str = Form(...)):
+def do_login(username: str = Form(...), password: str = Form(...)):
     if username == DASHBOARD_USER and password == DASHBOARD_PASS:
         token = secrets.token_hex(16)
         active_sessions.add(token)
-        response = RedirectResponse(url="/", status_code=303)
-        response.set_cookie(key="session_token", value=token, httponly=True, samesite="lax")
-        return response
+        resp = RedirectResponse(url="/", status_code=303)
+        resp.set_cookie(key="session_token", value=token, httponly=True, samesite="lax")
+        return resp
     return RedirectResponse(url="/login?error=1", status_code=303)
 
+
 @app.get("/api/logout")
-def logout(response: Response, session_token: Optional[str] = None):
+def logout(session_token: Optional[str] = Cookie(None)):
     if session_token and session_token in active_sessions:
         active_sessions.remove(session_token)
-    response = RedirectResponse(url="/login", status_code=303)
-    response.delete_cookie("session_token")
-    return response
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie("session_token")
+    return resp
+
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request, session_token: Optional[str] = None):
+def index(session_token: Optional[str] = Cookie(None)):
     if not session_token or session_token not in active_sessions:
         return RedirectResponse(url="/login")
     return (BASE / "dashboard.html").read_text(encoding="utf-8")
+
 
 # --- API ENDPOINTS ---
 
@@ -156,9 +186,11 @@ def ingest(p: Ingest):
     now = time.time()
     out = []
     dev_id = p.device
+    print(f"[ingest] {dev_id} ok={p.ok} err={p.error} results={len(p.results)}", flush=True)
 
     with lock:
-        if dev_id not in states: states[dev_id] = {"live": None, "holding": {}, "last_seen": 0.0, "slave": None, "ok": False, "error": None}
+        if dev_id not in states:
+            states[dev_id] = {"live": None, "holding": {}, "last_seen": 0.0, "slave": None, "ok": False, "error": None}
         states[dev_id].update(last_seen=now, slave=p.slave, ok=p.ok, error=p.error)
         if p.live: states[dev_id]["live"] = p.live
         if p.holding: states[dev_id]["holding"] = {int(k): v for k, v in p.holding.items()}
@@ -169,13 +201,13 @@ def ingest(p: Ingest):
             c["status"] = "ok" if r.get("ok") else "gagal"
             c["detail"] = r.get("error") or f"Balasan: {r.get('readback')}"
             s = SETTINGS_BY_REG.get(c["reg"], {})
-            audit(dev_id, c["reg"], s.get("label", ""), fmt_value(s, c.get("old_raw")), fmt_value(s, c["value"]), c["status"], c["detail"])
+            audit(dev_id, c["reg"], s.get("label", ""), fmt_value(s, c.get("old_raw")) if s else c.get("old_raw"), fmt_value(s, c["value"]) if s else c["value"], c["status"], c["detail"])
 
         if p.ok and p.live:
             L = p.live
-            db.execute("INSERT INTO readings VALUES (?,?,?,?,?,?,?,?,?)", (dev_id, int(now), L.get("pv1_w",0)+L.get("pv2_w",0), L.get("out_w"), L.get("bat_v"), L.get("soc"), L.get("bat_w"), L.get("grid_v"), L.get("inv_temp")))
+            db.execute("INSERT INTO readings VALUES (?,?,?,?,?,?,?,?,?)", (dev_id, int(now), (L.get("pv1_w") or 0) + (L.get("pv2_w") or 0), L.get("out_w"), L.get("bat_v"), L.get("soc"), L.get("bat_w"), L.get("grid_v"), L.get("inv_temp")))
             db.commit()
-            if L.get("fault", 0) > 0: send_telegram(f"[{dev_id}] FAULT! Kode: {L.get('fault')}")
+            if (L.get("fault") or 0) > 0: send_telegram(f"[{dev_id}] FAULT! Kode: {L.get('fault')}")
             process_automation(dev_id, L, states[dev_id]["holding"])
 
         for c in commands.values():
@@ -187,10 +219,12 @@ def ingest(p: Ingest):
                 c["status"] = "timeout"; c["detail"] = "Timeout"
     return {"commands": out}
 
+
 @app.get("/api/devices", dependencies=[Depends(verify_session)])
 def get_devices():
     with lock:
         return [{"id": k, "online": (time.time() - v["last_seen"]) < OFFLINE_AFTER_S if v["last_seen"] else False} for k, v in states.items()]
+
 
 @app.get("/api/latest", dependencies=[Depends(verify_session)])
 def latest(device_id: str):
@@ -201,6 +235,7 @@ def latest(device_id: str):
         settings = [{**st, "raw": h.get(st["reg"]), "display": fmt_value(st, h.get(st["reg"]))} for st in SETTINGS]
         return {"online": age is not None and age < OFFLINE_AFTER_S, "age_s": round(age, 1) if age is not None else None, "inverter_ok": s.get("ok", False), "error": s.get("error"), "live": s.get("live"), "settings": settings, "auto_soc": AUTO_SOC_ENABLED}
 
+
 @app.get("/api/history", dependencies=[Depends(verify_session)])
 def history(device_id: str, minutes: int = Query(60, ge=1, le=1440)):
     since = int(time.time()) - minutes * 60
@@ -208,6 +243,7 @@ def history(device_id: str, minutes: int = Query(60, ge=1, le=1440)):
         rows = db.execute("SELECT ts,pv_w,load_w,bat_v,soc,bat_w,grid_v,inv_temp FROM readings WHERE device_id=? AND ts>=? ORDER BY ts", (device_id, since)).fetchall()
     step = max(1, len(rows) // 600)
     return [dict(zip(["ts", "pv_w", "load_w", "bat_v", "soc", "bat_w", "grid_v", "inv_temp"], r)) for r in rows[::step]]
+
 
 @app.get("/api/export", dependencies=[Depends(verify_session)])
 def export_csv(device_id: str, minutes: int = Query(1440, ge=1, le=43200)):
@@ -221,6 +257,7 @@ def export_csv(device_id: str, minutes: int = Query(1440, ge=1, le=43200)):
     response = StreamingResponse(iter([output.getvalue()]), media_type="text/csv")
     response.headers["Content-Disposition"] = f"attachment; filename=histori_{device_id}.csv"
     return response
+
 
 @app.post("/api/settings", dependencies=[Depends(verify_session)])
 def change_setting(body: SettingIn):
@@ -239,9 +276,11 @@ def change_setting(body: SettingIn):
         if not s_state.get("last_seen") or time.time() - s_state["last_seen"] > OFFLINE_AFTER_S: raise HTTPException(409, "Device offline")
         for c in commands.values():
             if c["device_id"] == body.device_id and c["reg"] == body.reg and c["status"] in ("menunggu", "dikirim"): raise HTTPException(409, "Masih ada antrean")
+        old = s_state.get("holding", {}).get(body.reg)
         cid = next_cmd_id; next_cmd_id += 1
-        commands[cid] = {"id": cid, "device_id": body.device_id, "reg": body.reg, "label": s["label"], "value": raw, "old_raw": s_state["holding"].get(body.reg), "status": "menunggu", "detail": "Manual", "created_at": time.time(), "shown": fmt_value(s, raw), "old_shown": fmt_value(s, s_state["holding"].get(body.reg))}
+        commands[cid] = {"id": cid, "device_id": body.device_id, "reg": body.reg, "label": s["label"], "value": raw, "old_raw": old, "status": "menunggu", "detail": "Manual", "created_at": time.time(), "shown": fmt_value(s, raw), "old_shown": fmt_value(s, old)}
     return {"id": cid}
+
 
 @app.get("/api/commands", dependencies=[Depends(verify_session)])
 def list_commands(device_id: str):
@@ -250,11 +289,13 @@ def list_commands(device_id: str):
         hist = db.execute("SELECT ts,label,old,new,status,detail FROM audit WHERE device_id=? ORDER BY ts DESC LIMIT 30", (device_id,)).fetchall()
     return {"current": cur, "audit": [dict(zip(["ts", "label", "old", "new", "status", "detail"], r)) for r in hist]}
 
+
 @app.post("/api/automation", dependencies=[Depends(verify_session)])
 def toggle_auto(enabled: bool = Query(...)):
     global AUTO_SOC_ENABLED
     AUTO_SOC_ENABLED = enabled
     return {"auto_soc": AUTO_SOC_ENABLED}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

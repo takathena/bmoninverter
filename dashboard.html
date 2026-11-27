@@ -8,35 +8,30 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
 <style>
   :root {
-    --bg: #f4f4f4; --panel: #ffffff; --text: #111111; --text-muted: #555555; 
+    --bg: #f4f4f4; --panel: #ffffff; --text: #111111; --text-muted: #555555;
     --border: #111111; --border-light: #cccccc;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Courier New", Courier, monospace; }
   body { background: var(--bg); color: var(--text); font-size: 13px; }
-  
-  /* Layout */
+
   header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
   .header-title { font-weight: bold; font-size: 16px; text-transform: uppercase; letter-spacing: 1px; }
   .header-controls { display: flex; gap: 15px; align-items: center; }
   main { padding: 20px; max-width: 1400px; margin: 0 auto; display: grid; gap: 15px; }
-  
-  /* Grid System */
+
   .grid-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
   .grid-panels { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; }
-  
-  /* Cards & Panels (Sharp & Monochrome) */
+
   .panel { background: var(--panel); border: 1px solid var(--border); padding: 15px; }
   .panel-title { font-size: 11px; text-transform: uppercase; font-weight: bold; border-bottom: 1px solid var(--border-light); padding-bottom: 8px; margin-bottom: 12px; color: var(--text-muted); }
-  
-  /* Data Rows */
+
   .big-val { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
   .big-val small { font-size: 14px; font-weight: normal; color: var(--text-muted); }
   .data-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted var(--border-light); }
   .data-row:last-child { border-bottom: none; }
   .data-row span { color: var(--text-muted); }
   .data-row b { font-weight: bold; }
-  
-  /* Buttons & Inputs */
+
   button, select, input { font-family: inherit; font-size: 12px; border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 5px 10px; outline: none; }
   button { cursor: pointer; text-transform: uppercase; font-weight: bold; background: var(--panel); }
   button:hover { background: #ddd; }
@@ -45,21 +40,26 @@
   .indicator { display: inline-block; width: 8px; height: 8px; border: 1px solid var(--border); background: var(--bg); margin-right: 5px; }
   .indicator.on { background: var(--border); }
 
-  /* Table */
   table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-light); }
   th { text-transform: uppercase; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
-  
-  /* Charts */
+
   #chart { height: 350px; width: 100%; }
-  
-  /* Specific elements */
+
   .alert { border: 1px solid var(--border); padding: 10px; background: #e0e0e0; margin-bottom: 15px; display: none; font-weight: bold; }
+
+  /* Pengaturan: nilai saat ini + kontrol */
   .settings-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .setting-item { border: 1px solid var(--border-light); padding: 10px; display: flex; justify-content: space-between; align-items: center; }
-  .setting-item span { font-size: 12px; }
+  .setting-item { border: 1px solid var(--border-light); padding: 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .setting-item.changed { border-color: var(--border); background: #fafafa; }
+  .setting-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .setting-label { font-size: 12px; font-weight: bold; }
+  .setting-cur { font-size: 12px; color: var(--text-muted); }
+  .setting-cur b { color: var(--text); background: #e8e8e8; border: 1px solid var(--border-light); padding: 1px 6px; }
+  .setting-note { font-size: 11px; min-height: 14px; font-weight: bold; }
   .setting-item .controls { display: flex; gap: 5px; }
-  .setting-item input { width: 60px; }
+  .setting-item input { width: 70px; }
+  .section-hint { font-size: 11px; color: var(--text-muted); margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -89,14 +89,14 @@
     <div class="panel">
       <div class="panel-title">Baterai</div>
       <div class="big-val" id="soc">- <small>%</small></div>
-      <div class="data-row"><span>Tegangan</span><b id="bat_v">-</b></div>
+      <div class="data-row"><span>Voltase</span><b id="bat_v">-</b></div>
       <div class="data-row"><span>Daya</span><b id="bat_w">-</b></div>
     </div>
     <div class="panel">
       <div class="panel-title">Beban (Output)</div>
       <div class="big-val" id="out_w">- <small>W</small></div>
       <div class="data-row"><span>Beban</span><b id="load_pct">- %</b></div>
-      <div class="data-row"><span>Volt / Amp</span><b id="out_va2">-</b></div>
+      <div class="data-row"><span>Voltase / Ampere</span><b id="out_va2">-</b></div>
     </div>
     <div class="panel">
       <div class="panel-title">PLN (Grid)</div>
@@ -111,7 +111,7 @@
       <div class="panel-title">Riwayat Beban & Baterai</div>
       <div id="chart"></div>
     </div>
-    
+
     <div class="panel">
       <div class="panel-title">Kontrol & Status</div>
       <div class="data-row"><span>Status Sistem</span><b id="sys_status">-</b></div>
@@ -137,6 +137,7 @@
 
   <div class="panel">
     <div class="panel-title">Pengaturan Inverter</div>
+    <div class="section-hint">SAAT INI = nilai yang sedang aktif di inverter (dibaca ulang tiap ±15 detik). Dropdown/kolom = nilai yang akan Anda kirim.</div>
     <div class="settings-grid" id="settingsBox"></div>
   </div>
 
@@ -165,11 +166,15 @@ async function loadDevices() {
   const devs = await (await api("/api/devices")).json();
   const sel = $("devSelect");
   sel.innerHTML = devs.map(d => `<option value="${d.id}">${d.id.toUpperCase()}</option>`).join("");
-  if (devs.length > 0 && !currentDev) { currentDev = devs[0].id; sel.value = currentDev; }
+  if (devs.length > 0 && !currentDev) { currentDev = devs[0].id; }
+  if (currentDev) sel.value = currentDev;
 }
 
 function switchDev() {
   currentDev = $("devSelect").value;
+  $("settingsBox").innerHTML = "";
+  Object.keys(elCache).forEach(k => delete elCache[k]);
+  Object.keys(pending).forEach(k => delete pending[k]);
   updateLive(); loadHistory(); loadLogs();
 }
 
@@ -177,75 +182,111 @@ async function updateLive() {
   if (!currentDev) { await loadDevices(); if (!currentDev) return; }
   try {
     const d = await (await api(`/api/latest?device_id=${currentDev}`)).json();
-    
-    // Status Indikator
+
     $("ind").className = "indicator" + (d.online ? " on" : "");
     $("conn-status").textContent = d.online ? "ONLINE" : "OFFLINE";
     $("alert-banner").style.display = (d.online && !d.inverter_ok) ? "block" : "none";
-    
-    // Tombol Auto SOC
     $("auto_status").textContent = d.auto_soc ? "AKTIF" : "MATI";
 
+    renderSettings(d.settings);
+
     const L = d.live; if (!L) return;
-    
-    // Kartu Data
+
     $("pv_w").innerHTML = `${f(L.pv1_w + L.pv2_w, 0)} <small>W</small>`;
     $("pv1").textContent = `${f(L.pv1_v)}V / ${f(L.pv1_a)}A`;
     $("pv2").textContent = `${f(L.pv2_v)}V / ${f(L.pv2_a)}A`;
-    
+
     $("soc").innerHTML = `${L.soc} <small>%</small>`;
     $("bat_v").textContent = `${f(L.bat_v, 2)} V`;
     $("bat_w").textContent = `${f(Math.abs(L.bat_w), 0)} W (${L.bat_w > 0 ? "DIS" : "CHG"})`;
-    
+
     $("out_w").innerHTML = `${f(L.out_w, 0)} <small>W</small>`;
     $("load_pct").textContent = `${f(L.load_pct)} %`;
     $("out_va2").textContent = `${f(L.out_v)}V / ${f(L.out_a)}A`;
-    
+
     $("grid_v").innerHTML = `${f(L.grid_v)} <small>V</small>`;
     $("grid_hz").textContent = `${f(L.grid_hz, 2)} Hz`;
     $("acin_w").textContent = `${f(L.acin_w, 0)} W`;
-    
-    // Panel Kanan
+
     $("sys_status").textContent = STATUS[L.status] || L.status;
     $("inv_temp").textContent = `${f(L.inv_temp)} °C`;
     $("fault").textContent = L.fault ? `0x${L.fault.toString(16).toUpperCase()}` : "NONE";
-    
-    renderSettings(d.settings);
   } catch (e) {}
 }
 
-const elCache = {};
+// ================= PENGATURAN =================
+const elCache = {};   // reg -> {div, ctrl, cur, note, s}
+const pending = {};   // reg -> {raw, cid}  (perintah terkirim, menunggu inverter)
+
+const toRaw = (s, v) => s.type === "enum" ? Number(v) : Math.round(Number(v) / s.scale);
+const curText = s => (s.raw === null || s.raw === undefined) ? "-" : `${s.display}${s.type === "enum" ? "" : " " + (s.unit || "")}`;
+
+function refreshNote(reg) {
+  const e = elCache[reg]; if (!e) return;
+  const s = e.s, ctrl = e.ctrl;
+  const diff = s.raw !== null && s.raw !== undefined && ctrl.value !== "" && toRaw(s, ctrl.value) !== s.raw;
+  e.div.classList.toggle("changed", !!ctrl.dataset.dirty && diff);
+  if (pending[reg]) { e.note.textContent = "⏳ MENUNGGU INVERTER..."; }
+  else if (ctrl.dataset.dirty && diff) { e.note.textContent = "● BELUM DITERAPKAN"; }
+  else if (!e.failMsg) { e.note.textContent = ""; }
+}
+
 function renderSettings(list) {
   const box = $("settingsBox");
   list.forEach(s => {
     if (!s.writable) return;
     if (!elCache[s.reg]) {
       const div = document.createElement("div"); div.className = "setting-item";
-      let inp = s.type === "enum" 
+      const inp = s.type === "enum"
         ? `<select>${Object.entries(s.options).map(([k,v]) => `<option value="${k}">${v}</option>`).join("")}</select>`
         : `<input type="number" min="${s.min}" max="${s.max}" step="${s.scale<1?0.1:1}">`;
-      div.innerHTML = `<span>${s.label}</span><div class="controls">${inp}<button>SET</button></div>`;
-      
+      div.innerHTML = `
+        <div class="setting-info">
+          <span class="setting-label">${s.label}</span>
+          <span class="setting-cur">SAAT INI: <b class="cur">-</b></span>
+          <span class="setting-note"></span>
+        </div>
+        <div class="controls">${inp}<button>SET</button></div>`;
       const ctrl = div.querySelector("select, input");
-      ctrl.oninput = () => ctrl.dataset.dirty = "1";
-      
-      div.querySelector("button").onclick = () => applySetting(s, ctrl);
-      box.appendChild(div); elCache[s.reg] = div;
+      const entry = { div, ctrl, cur: div.querySelector(".cur"), note: div.querySelector(".setting-note"), s, failMsg: false };
+      ctrl.oninput = ctrl.onchange = () => { ctrl.dataset.dirty = "1"; entry.failMsg = false; refreshNote(s.reg); };
+      div.querySelector("button").onclick = () => applySetting(entry.s, ctrl);
+      box.appendChild(div); elCache[s.reg] = entry;
     }
-    const ctrl = elCache[s.reg].querySelector("select, input");
-    if (!ctrl.dataset.dirty && s.raw !== null) ctrl.value = s.type === "enum" ? s.raw : s.display;
+    const e = elCache[s.reg];
+    e.s = s;
+    e.cur.textContent = curText(s);
+
+    // Perintah sudah diterapkan: nilai inverter sama dengan yang diminta
+    const p = pending[s.reg];
+    if (p && s.raw === p.raw) {
+      delete pending[s.reg];
+      e.ctrl.dataset.dirty = "";
+      e.failMsg = false;
+    }
+    // Sinkronkan kontrol ke nilai inverter hanya jika user tidak sedang mengubah
+    if (!e.ctrl.dataset.dirty && !pending[s.reg] && s.raw !== null && s.raw !== undefined) {
+      e.ctrl.value = s.type === "enum" ? s.raw : s.display;
+    }
+    refreshNote(s.reg);
   });
 }
 
 async function applySetting(s, ctrl) {
+  if (ctrl.value === "") return;
   const val = Number(ctrl.value);
-  if (!confirm(`Ubah ${s.label} ke ${val}?`)) return;
+  const shown = s.type === "enum" ? s.options[val] : `${val} ${s.unit || ""}`;
+  if (!confirm(`Ubah ${s.label}\nDari: ${curText(s)}\nKe: ${shown}\n\nLanjutkan?`)) return;
   try {
-    await api("/api/settings", {
+    const r = await api("/api/settings", {
       method: "POST", headers: {"Content-Type":"application/json"},
       body: JSON.stringify({ device_id: currentDev, reg: s.reg, value: val })
     });
-    ctrl.dataset.dirty = "";
+    const j = await r.json();
+    if (!r.ok) { alert("Ditolak: " + (j.detail || r.status)); return; }
+    pending[s.reg] = { raw: toRaw(s, val), cid: j.id };
+    elCache[s.reg].failMsg = false;
+    refreshNote(s.reg);
     loadLogs();
   } catch (e) { alert("Gagal mengirim perintah"); }
 }
@@ -257,9 +298,25 @@ async function toggleAuto() {
 }
 
 async function loadLogs() {
+  if (!currentDev) return;
   const j = await (await api(`/api/commands?device_id=${currentDev}`)).json();
+
+  // Cek perintah pending yang gagal / timeout
+  Object.keys(pending).forEach(reg => {
+    const c = j.current.find(x => x.id === pending[reg].cid);
+    if (c && (c.status === "gagal" || c.status === "timeout")) {
+      const e = elCache[reg];
+      delete pending[reg];
+      if (e) {
+        e.ctrl.dataset.dirty = "";
+        e.failMsg = true;
+        e.note.textContent = `✕ ${c.status.toUpperCase()}: ${c.detail || ""}`;
+      }
+    }
+  });
+
   const rows = [];
-  j.current.forEach(c => rows.push(`<tr><td>SEKARANG</td><td>${c.label}</td><td>-</td><td>${c.shown}</td><td>${c.status.toUpperCase()}</td><td>${c.detail}</td></tr>`));
+  j.current.forEach(c => rows.push(`<tr><td>SEKARANG</td><td>${c.label}</td><td>${c.old_shown ?? "-"}</td><td>${c.shown}</td><td>${c.status.toUpperCase()}</td><td>${c.detail}</td></tr>`));
   j.audit.forEach(a => rows.push(`<tr><td>${new Date(a.ts*1000).toLocaleTimeString()}</td><td>${a.label}</td><td>${a.old}</td><td>${a.new}</td><td>${a.status.toUpperCase()}</td><td>${a.detail || "-"}</td></tr>`));
   $("auditBody").innerHTML = rows.join("") || `<tr><td colspan="6">TIDAK ADA LOG</td></tr>`;
 }
@@ -269,9 +326,10 @@ let myChart = echarts.init($("chart"), null, { renderer: 'svg' });
 window.addEventListener('resize', () => myChart.resize());
 
 async function loadHistory() {
+  if (!currentDev) return;
   const data = await (await api(`/api/history?minutes=${$("range").value}&device_id=${currentDev}`)).json();
   const times = data.map(r => new Date(r.ts * 1000).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }));
-  
+
   myChart.setOption({
     animation: false,
     grid: { top: 30, right: 30, bottom: 30, left: 50 },

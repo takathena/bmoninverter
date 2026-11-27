@@ -1,4 +1,4 @@
-# ESP32 (MicroPython) v1.4 (Multi-Inverter)
+# ESP32 (MicroPython) v1.5 - Multi-Inverter + debug
 import network, time, json, machine, gc
 from machine import UART, Pin
 
@@ -8,11 +8,11 @@ except ImportError:
     import requests
 
 # ================== ISI BAGIAN INI ==================
-WIFI_SSID = "NAMA_WIFI"
-WIFI_PASS = "PASSWORD_WIFI"
-SERVER_URL = "http://192.168.1.10:8000/api/ingest" 
-API_KEY = "KunciRahasiaESP32Anda"
-DEVICE_ID = "esp32_rumah"  # <--- BERI NAMA UNIK UNTUK SETIAP ESP32
+WIFI_SSID = "JARINGANKU"
+WIFI_PASS = "jaringanKu"
+SERVER_URL = "http://10.10.66.121:8080/api/ingest"
+API_KEY = "set123"
+DEVICE_ID = "esp32_rumah"
 SLAVE_CANDIDATES = [1, 11]
 POLL_MS = 3000
 # =====================================================
@@ -34,12 +34,15 @@ _last_cmd = time.ticks_ms()
 wdt = machine.WDT(timeout=60000)
 offline_buffer = []
 
+
 def crc16(data):
     crc = 0xFFFF
     for b in data:
         crc ^= b
-        for _ in range(8): crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+        for _ in range(8):
+            crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
     return crc
+
 
 def _txrx(req, resp_len, timeout_ms=700):
     global _last_cmd
@@ -67,10 +70,12 @@ def _txrx(req, resp_len, timeout_ms=700):
     if buf[1] & 0x80: raise OSError("exception modbus %d" % buf[2])
     return buf
 
+
 def read_regs(fc, addr, count):
     req = bytes([slave_id, fc, addr >> 8, addr & 0xFF, count >> 8, count & 0xFF])
     buf = _txrx(req, 5 + 2 * count)
     return [(buf[3 + 2 * i] << 8) | buf[4 + 2 * i] for i in range(count)]
+
 
 def read_retry(fc, addr, count, tries=2):
     for i in range(tries):
@@ -78,9 +83,11 @@ def read_retry(fc, addr, count, tries=2):
         except OSError:
             if i == tries - 1: raise
 
+
 def write_reg(addr, val):
     req = bytes([slave_id, 6, addr >> 8, addr & 0xFF, val >> 8, val & 0xFF])
     _txrx(req, 8)
+
 
 def s16(v): return v - 65536 if v >= 32768 else v
 def u32(h, l): return (h << 16) | l
@@ -88,11 +95,13 @@ def s32(h, l):
     v = u32(h, l)
     return v - (1 << 32) if v & 0x80000000 else v
 
+
 def read_input_all():
     ir = read_retry(4, 0, 45)
     try: ir += read_retry(4, 45, 45)
     except OSError: ir += [0] * 45
     return ir
+
 
 def decode(g):
     r = lambda x, d=1: round(x, d)
@@ -113,6 +122,7 @@ def decode(g):
         "bat_w": r(s32(g[77],g[78])*0.1), "overcharge": g[80], "mppt_fan": g[81], "inv_fan": g[82],
     }
 
+
 def wifi_connect():
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
@@ -124,8 +134,9 @@ def wifi_connect():
             if time.ticks_diff(time.ticks_ms(), t0) > 15000:
                 print("WiFi gagal tersambung."); return wlan
             time.sleep_ms(500); wdt.feed()
-    print("WiFi OK:", wlan.ifconfig()[0])
+    print("WiFi OK:", wlan.ifconfig())
     return wlan
+
 
 def detect_slave():
     global slave_id
@@ -134,15 +145,27 @@ def detect_slave():
         try:
             read_regs(4, 0, 1)
             print("Inverter menjawab di alamat", sid); return True
-        except OSError as e: print("Alamat", sid, "gagal:", e)
+        except OSError as e:
+            print("Alamat", sid, "gagal:", e)
+        wdt.feed()
     slave_id = SLAVE_CANDIDATES[0]
     return False
 
+
 def post(payload):
     headers = {"Content-Type": "application/json", "X-API-Key": API_KEY}
-    r = requests.post(SERVER_URL, data=json.dumps(payload), headers=headers, timeout=HTTP_TIMEOUT)
-    try: return r.json()
-    finally: r.close()
+    body = json.dumps(payload)
+    try:
+        r = requests.post(SERVER_URL, data=body, headers=headers, timeout=HTTP_TIMEOUT)
+    except TypeError:  # urequests lama tidak punya argumen timeout
+        r = requests.post(SERVER_URL, data=body, headers=headers)
+    try:
+        if r.status_code != 200:
+            raise Exception("HTTP %d" % r.status_code)
+        return r.json()
+    finally:
+        r.close()
+
 
 def run_cmd(c):
     res = {"id": c.get("id"), "reg": c.get("reg"), "value": c.get("value"), "ok": False, "readback": None, "error": None}
@@ -151,27 +174,32 @@ def run_cmd(c):
         if reg not in WRITE_ALLOWED: raise ValueError("register tidak diizinkan")
         lo, hi = WRITE_ALLOWED[reg]
         if not lo <= val <= hi: raise ValueError("nilai di luar rentang %d-%d" % (lo, hi))
-        
+
         write_reg(reg, val)
+        wdt.feed()
         time.sleep_ms(1000)
-        
+
         success = False
+        rb = None
         for attempt in range(3):
+            wdt.feed()
             rb = read_retry(3, reg, 1)[0]
             res["readback"] = rb
-            if rb == val: success = True; break
-            print(f"  Readback mismatch (Coba {attempt+1}/3): minta {val}, dapat {rb}")
+            if rb == val:
+                success = True; break
+            print("  Readback mismatch (Coba %d/3): minta %d, dapat %d" % (attempt + 1, val, rb))
             time.sleep_ms(500)
-            
+
         res["ok"] = success
-        if not res["ok"]: res["error"] = "inverter tidak menerima setelah 3x coba (nilai kembali %d)" % rb
+        if not success:
+            res["error"] = "inverter tidak menerima setelah 3x coba (nilai kembali %s)" % rb
     except Exception as e:
         res["error"] = str(e)
     print("Perintah:", res)
     return res
 
+
 def main():
-    global offline_buffer
     wlan = wifi_connect()
     found = detect_slave()
     results = []
@@ -180,38 +208,46 @@ def main():
 
     while True:
         wdt.feed()
-        gc.collect() 
+        gc.collect()
         if not wlan.isconnected():
             print("WiFi terputus! Mencoba menyambung ulang...")
             wlan = wifi_connect()
-            if not wlan.isconnected(): time.sleep(5); continue
+            if not wlan.isconnected():
+                time.sleep(5); continue
 
         t0 = time.ticks_ms()
-        # Tambahkan DEVICE_ID ke payload
         payload = {"device": DEVICE_ID, "slave": slave_id, "ok": False}
         try:
             payload["live"] = decode(read_input_all()); payload["ok"] = True
         except OSError as e:
             payload["error"] = str(e)
             if not found: found = detect_slave()
+        print("Baca inverter:", payload["ok"], payload.get("error"))
+        wdt.feed()
 
         if payload["ok"] and (force_hr or n % HOLDING_EVERY == 0):
             try:
                 hr = read_retry(3, 0, 45)
                 payload["holding"] = {str(i): v for i, v in enumerate(hr)}
                 force_hr = False
-            except OSError as e: print("Gagal baca holding:", e)
+            except OSError as e:
+                print("Gagal baca holding:", e)
 
         payload["results"] = results
 
         try:
+            print("Kirim ke", SERVER_URL)
             resp = post(payload)
-            results = [] 
+            print("Server OK, perintah:", len(resp.get("commands", [])))
+            results = []
             while offline_buffer:
                 old_payload = offline_buffer.pop(0)
-                try: post(old_payload); print("Berhasil mengirim data offline tertunda.")
-                except: offline_buffer.insert(0, old_payload); break
-            
+                try:
+                    post(old_payload); print("Data offline terkirim.")
+                except Exception:
+                    offline_buffer.insert(0, old_payload); break
+                wdt.feed()
+
             for c in resp.get("commands", []):
                 results.append(run_cmd(c))
                 force_hr = True
@@ -222,5 +258,6 @@ def main():
         n += 1
         left = POLL_MS - time.ticks_diff(time.ticks_ms(), t0)
         if left > 0: time.sleep_ms(left)
+
 
 main()
