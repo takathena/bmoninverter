@@ -65,9 +65,13 @@ SETTINGS: List[Dict[str, Any]] = [
     {"reg": 2, "key": "charge_cfg", "label": "Sumber Charge", "type": "enum", "writable": True, "options": {0: "Panel", 1: "Panel + PLN", 2: "Panel Saja"}},
     {"reg": 3, "key": "uti_out_start", "label": "Jam Mulai PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
     {"reg": 4, "key": "uti_out_end", "label": "Jam Selesai PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
+    {"reg": 5, "key": "uti_chg_start", "label": "Jam Mulai Charge PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
+    {"reg": 6, "key": "uti_chg_end", "label": "Jam Selesai Charge PLN", "type": "number", "writable": True, "min": 0, "max": 23, "scale": 1, "unit": "Jam"},
+    {"reg": 22, "key": "buzzer", "label": "Buzzer", "type": "enum", "writable": True, "options": {0: "Mati", 1: "Nyala"}},
     {"reg": 34, "key": "max_chg_a", "label": "Ampere Charge Maks", "type": "number", "writable": True, "min": 10, "max": 130, "scale": 1, "unit": "A", "danger": True},
     {"reg": 35, "key": "bulk_v", "label": "Voltase Bulk", "type": "number", "writable": True, "min": 50.0, "max": 58.0, "scale": 0.1, "unit": "V", "danger": True},
     {"reg": 36, "key": "float_v", "label": "Voltase Float", "type": "number", "writable": True, "min": 50.0, "max": 56.0, "scale": 0.1, "unit": "V", "danger": True},
+    {"reg": 37, "key": "low_v", "label": "Voltase Low Baterai", "type": "number", "writable": True, "min": 44.4, "max": 51.4, "scale": 0.1, "unit": "V", "danger": True},
 ]
 SETTINGS_BY_REG = {s["reg"]: s for s in SETTINGS}
 
